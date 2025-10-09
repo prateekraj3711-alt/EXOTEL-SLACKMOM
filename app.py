@@ -35,7 +35,7 @@ app = FastAPI(
 
 # Configuration from environment
 SLACK_WEBHOOK_URL = os.environ.get('SLACK_WEBHOOK_URL')
-DEEPGRAM_API_KEY = os.environ.get('DEEPGRAM_API_KEY')  # Deepgram for transcription
+DEEPGRAM_API_KEY = os.environ.get('DEEPGRAM_API_KEY')
 EXOTEL_API_KEY = os.environ.get('EXOTEL_API_KEY')
 EXOTEL_API_TOKEN = os.environ.get('EXOTEL_API_TOKEN')
 EXOTEL_SID = os.environ.get('EXOTEL_SID')
@@ -54,7 +54,6 @@ def load_agent_mapping():
         if agent_file.exists():
             with open(agent_file, 'r') as f:
                 data = json.load(f)
-                # Filter out comment keys
                 AGENT_MAPPING = {k: v for k, v in data.items() if not k.startswith('_')}
             logger.info(f"Loaded {len(AGENT_MAPPING)} agent mappings")
         else:
@@ -62,7 +61,6 @@ def load_agent_mapping():
     except Exception as e:
         logger.error(f"Failed to load agent mapping: {e}")
 
-# Load agent mapping on startup
 load_agent_mapping()
 
 # Pydantic Models
@@ -199,13 +197,11 @@ class TranscriptionService:
     def download_recording(self, recording_url: str, call_id: str) -> str:
         """Download recording from Exotel"""
         try:
-            # Create downloads directory
             downloads_dir = Path("downloads")
             downloads_dir.mkdir(exist_ok=True)
             
             file_path = downloads_dir / f"{call_id}.mp3"
             
-            # Download with authentication
             auth = (EXOTEL_API_KEY, EXOTEL_API_TOKEN) if EXOTEL_API_KEY else None
             
             response = requests.get(recording_url, auth=auth, timeout=60)
@@ -226,14 +222,11 @@ class TranscriptionService:
         try:
             logger.info("Transcribing audio with Deepgram (basic model)...")
             
-            # Use basic Deepgram parameters compatible with free tier
             params = {
                 "punctuate": "true",
                 "language": "en"
             }
-            # Removed: model, smart_format, diarize, tier - use defaults for free tier
             
-            # Send audio file directly
             with open(audio_file_path, 'rb') as audio_file:
                 response = requests.post(
                     self.api_url,
@@ -246,7 +239,6 @@ class TranscriptionService:
             response.raise_for_status()
             result = response.json()
             
-            # Extract transcription
             if 'results' in result and 'channels' in result['results']:
                 channel = result['results']['channels'][0]
                 
@@ -264,7 +256,6 @@ class TranscriptionService:
             logger.error(f"Deepgram transcription error: {e}")
             raise
         finally:
-            # Cleanup downloaded file
             try:
                 if os.path.exists(audio_file_path):
                     os.remove(audio_file_path)
@@ -275,7 +266,7 @@ class TranscriptionService:
 
 # Slack Formatter
 class SlackFormatter:
-    """Format call data for Slack posting in exact format from image"""
+    """Format call data for Slack posting"""
     
     @staticmethod
     def normalize_phone(phone: str) -> str:
@@ -287,12 +278,10 @@ class SlackFormatter:
         """Get agent information from phone number"""
         normalized = SlackFormatter.normalize_phone(phone_number)
         
-        # Check agent mapping
         for mapped_phone, agent_data in AGENT_MAPPING.items():
             if SlackFormatter.normalize_phone(mapped_phone) == normalized:
                 return agent_data
         
-        # Default if not found
         return {
             "name": "Support Agent",
             "slack_handle": "@support",
@@ -304,15 +293,12 @@ class SlackFormatter:
     def determine_direction(from_number: str, to_number: str, support_number: str) -> str:
         """Determine call direction based on phone numbers"""
         from_clean = SlackFormatter.normalize_phone(from_number)
-        to_clean = SlackFormatter.normalize_phone(to_number)
-        support_clean = SlackFormatter.normalize_phone(support_number)
         
-        # Check if from_number matches any agent in mapping
         for mapped_phone in AGENT_MAPPING.keys():
             if SlackFormatter.normalize_phone(mapped_phone) == from_clean:
                 return "outgoing"
         
-        # Fallback to support number check
+        support_clean = SlackFormatter.normalize_phone(support_number)
         if support_clean in from_clean:
             return "outgoing"
         else:
@@ -320,52 +306,25 @@ class SlackFormatter:
     
     @staticmethod
     def format_message(call_data: Dict[str, Any], transcription: str) -> str:
-        """
-        Format Slack message in exact format from the image
+        """Format Slack message"""
         
-        Format:
-        📞 Support Number: ...
-        📱 Candidate/Customer Number: ...
-        ❗ Concern: [First 100 chars of transcription]
-        👤 CS Agent: @handle
-        🏢 Department: ...
-        ⏰ Timestamp: ...
-        
-        📋 Call Metadata:
-        • Call ID: ...
-        • Duration: ...
-        • Status: ...
-        • Agent: ...
-        • Customer Segment: ...
-        
-        📝 Full Transcription:
-        [Complete transcription]
-        
-        🎧 Recording/Voice Note:
-        [Recording available but not displayed per requirements]
-        """
-        
-        # Determine call direction
         direction = SlackFormatter.determine_direction(
             call_data['from_number'],
             call_data['to_number'],
             SUPPORT_NUMBER
         )
         
-        # Set support and customer numbers based on direction
         if direction == "outgoing":
             support_number = call_data['from_number']
             customer_number = call_data['to_number']
-        else:  # incoming
+        else:
             support_number = call_data['to_number']
             customer_number = call_data['from_number']
         
-        # Get concern (first 100 characters of transcription or first sentence)
         concern = transcription[:200] + "..." if len(transcription) > 200 else transcription
         if '\n' in concern:
             concern = concern.split('\n')[0]
         
-        # Get agent info from phone number or use provided data
         agent_phone = call_data.get('agent_phone')
         if agent_phone:
             agent_info = SlackFormatter.get_agent_info(agent_phone)
@@ -373,31 +332,25 @@ class SlackFormatter:
             agent_handle = agent_info['slack_handle']
             department = agent_info['department']
         else:
-            # Use provided data or defaults
-            agent_name = call_data.get('agent_name', 'Support Agent')
-            agent_handle = call_data.get('agent_slack_handle', '@support')
-            department = call_data.get('department', 'Customer Success')
+            agent_name = call_data.get('agent_name') or 'Support Agent'
+            agent_handle = call_data.get('agent_slack_handle') or '@support'
+            department = call_data.get('department') or 'Customer Success'
         
-        # Ensure agent handle has @ and is not None
-if agent_handle and not agent_handle.startswith('@'):
-    agent_handle = f"@{agent_handle}"
-elif not agent_handle:
-    agent_handle = '@support'
+        if agent_handle and not agent_handle.startswith('@'):
+            agent_handle = f"@{agent_handle}"
+        elif not agent_handle:
+            agent_handle = '@support'
         
-        # Format timestamp
         timestamp = call_data.get('timestamp', datetime.utcnow().isoformat())
         if 'T' in timestamp:
-            # Parse ISO format
             dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
             timestamp_formatted = dt.strftime('%Y-%m-%d %H:%M:%S UTC')
         else:
             timestamp_formatted = timestamp
         
-        # Format duration
         duration_sec = call_data.get('duration', 0)
         duration_formatted = f"{duration_sec}s"
         
-        # Build message
         message = f"""📞 *Support Number:*
 {support_number}
 
@@ -405,10 +358,10 @@ elif not agent_handle:
 {customer_number}
 
 ❗ *Concern:*
-Call inquiry: Person you are speaking with has put your call on ... (Tone: Neutral)
+{concern}
 
 👤 *CS Agent:*
-{agent_handle} <{call_data.get('from_number', 'N/A')}>
+{agent_handle} <{support_number}>
 
 🏢 *Department:*
 {department}
@@ -424,12 +377,10 @@ Call inquiry: Person you are speaking with has put your call on ... (Tone: Neutr
 • Customer Segment: {call_data.get('customer_segment', 'General')}
 
 📝 *Full Transcription:*
-```
 {transcription}
-```
 
 🎧 *Recording/Voice Note:*
-Recording processed and transcribed above (as per no-audio requirement)"""
+Recording processed and transcribed above"""
         
         return message
     
@@ -472,18 +423,15 @@ def process_call_background(call_data: Dict[str, Any]):
     try:
         logger.info(f"Starting background processing for call {call_id}")
         
-        # Check if recording URL is provided
         recording_url = call_data.get('recording_url')
         if not recording_url:
             logger.warning(f"No recording URL for call {call_id}")
             db_manager.mark_call_processed(call_data, "No recording available", False)
             return
         
-        # Download recording
         logger.info(f"Downloading recording for call {call_id}")
         audio_file = transcription_service.download_recording(recording_url, call_id)
         
-        # Transcribe audio
         logger.info(f"Transcribing call {call_id}")
         transcription = transcription_service.transcribe_audio(audio_file)
         
@@ -492,14 +440,12 @@ def process_call_background(call_data: Dict[str, Any]):
         
         logger.info(f"Transcription completed: {len(transcription)} characters")
         
-        # Format and post to Slack
         logger.info(f"Formatting message for Slack")
         slack_message = SlackFormatter.format_message(call_data, transcription)
         
         logger.info(f"Posting to Slack")
         success = SlackFormatter.post_to_slack(slack_message, SLACK_WEBHOOK_URL)
         
-        # Mark as processed
         db_manager.mark_call_processed(call_data, transcription, success)
         
         if success:
@@ -551,17 +497,11 @@ async def zapier_webhook(
     payload: ZapierWebhookPayload,
     background_tasks: BackgroundTasks
 ):
-    """
-    Main webhook endpoint for Zapier integration
-    
-    Receives call data from Zapier, checks for duplicates,
-    and processes in background (transcribe + post to Slack)
-    """
+    """Main webhook endpoint for Zapier integration"""
     try:
         call_id = payload.call_id
         logger.info(f"Received webhook for call {call_id}")
         
-        # Check for duplicate
         if db_manager.is_call_processed(call_id):
             logger.info(f"Duplicate call detected: {call_id}")
             return WebhookResponse(
@@ -571,14 +511,12 @@ async def zapier_webhook(
                 timestamp=datetime.utcnow().isoformat() + "Z"
             )
         
-        # Validate required services
         if not SLACK_WEBHOOK_URL:
             raise HTTPException(status_code=500, detail="Slack webhook not configured")
         
         if not transcription_service:
             raise HTTPException(status_code=500, detail="Transcription service not configured")
         
-        # Prepare call data
         call_data = {
             'call_id': call_id,
             'from_number': payload.from_number,
@@ -587,14 +525,13 @@ async def zapier_webhook(
             'recording_url': payload.recording_url,
             'timestamp': payload.timestamp or datetime.utcnow().isoformat(),
             'status': payload.status,
-            'agent_phone': payload.agent_phone,  # NEW: Phone-based tracking
+            'agent_phone': payload.agent_phone,
             'agent_name': payload.agent_name,
             'agent_slack_handle': payload.agent_slack_handle,
             'department': payload.department,
             'customer_segment': payload.customer_segment
         }
         
-        # Queue background processing
         background_tasks.add_task(process_call_background, call_data)
         
         logger.info(f"Queued processing for call {call_id}")
@@ -638,7 +575,6 @@ async def get_call_details(call_id: str):
         return dict(result)
 
 
-# Error handlers
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     """Handle HTTP exceptions"""
@@ -666,7 +602,6 @@ async def general_exception_handler(request: Request, exc: Exception):
     )
 
 
-# Startup event
 @app.on_event("startup")
 async def startup_event():
     """Initialize on startup"""
@@ -679,11 +614,9 @@ async def startup_event():
     logger.info(f"Support Number: {SUPPORT_NUMBER}")
     logger.info("=" * 60)
     
-    # Create directories
     Path("downloads").mkdir(exist_ok=True)
 
 
-# Main entry point
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     
@@ -694,5 +627,3 @@ if __name__ == "__main__":
         log_level="info",
         access_log=True
     )
-
-
