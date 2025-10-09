@@ -361,7 +361,7 @@ class SlackFormatter:
 {concern}
 
 👤 *CS Agent:*
-{agent_handle} <{support_number}>
+{agent_name} {agent_handle}
 
 🏢 *Department:*
 {department}
@@ -377,10 +377,7 @@ class SlackFormatter:
 • Customer Segment: {call_data.get('customer_segment', 'General')}
 
 📝 *Full Transcription:*
-{transcription}
-
-🎧 *Recording/Voice Note:*
-Recording processed and transcribed above"""
+{transcription}"""
         
         return message
     
