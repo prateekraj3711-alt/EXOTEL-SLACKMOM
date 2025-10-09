@@ -36,6 +36,7 @@ app = FastAPI(
 
 # Configuration from environment
 SLACK_WEBHOOK_URL = os.environ.get('SLACK_WEBHOOK_URL')
+SLACK_BOT_TOKEN = os.environ.get('SLACK_BOT_TOKEN')  # For querying Slack users
 DEEPGRAM_API_KEY = os.environ.get('DEEPGRAM_API_KEY')  # Deepgram for transcription
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')  # OpenAI for MOM generation
 EXOTEL_API_KEY = os.environ.get('EXOTEL_API_KEY')
@@ -305,28 +306,34 @@ class MOMGenerator:
 Analyze this call transcription and create a structured MOM with these sections:
 
 **Customer Issue:**
-[Summarize the main problem/concern the customer is reporting]
+[Summarize the main problem/concern the customer is reporting - minimum 1 line]
 
 **Key Discussion Points:**
-[List 2-3 main points discussed in the call]
+[List at least 2-3 main points discussed in the call - each point on a new line]
 
 **Action Items:**
-[List specific actions needed to resolve this issue]
+[List specific actions needed to resolve this issue - each action on a new line]
 
 **Resolution Status:**
 [State if issue was resolved or pending]
 
+IMPORTANT: 
+- The MOM must have AT LEAST 3 substantial lines of content
+- Each section should be detailed and informative
+- Do not make it too brief - provide enough context
+- Include specific details from the transcription
+
 Transcription:
 {transcription}
 
-Create the MOM in a clear, professional format. Be concise but capture all important details."""
+Create the MOM in a clear, professional format with sufficient detail."""
 
             payload = {
                 "model": "gpt-3.5-turbo",
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are a professional customer support analyst who creates clear, concise meeting minutes."
+                        "content": "You are a professional customer support analyst who creates detailed, well-structured meeting minutes with sufficient context."
                     },
                     {
                         "role": "user",
@@ -334,7 +341,7 @@ Create the MOM in a clear, professional format. Be concise but capture all impor
                     }
                 ],
                 "temperature": 0.3,
-                "max_tokens": 500
+                "max_tokens": 800
             }
             
             response = requests.post(
@@ -361,6 +368,85 @@ Create the MOM in a clear, professional format. Be concise but capture all impor
             return f"**Call Summary:**\n{transcription[:500]}..."
 
 
+# Slack User Lookup Service
+class SlackUserLookup:
+    """Query Slack workspace to find user info by phone number"""
+    
+    def __init__(self, bot_token: Optional[str]):
+        self.bot_token = bot_token
+        self.users_cache = {}  # Cache to avoid repeated API calls
+        self.cache_loaded = False
+    
+    def normalize_phone(self, phone: str) -> str:
+        """Normalize phone number for comparison"""
+        # Remove all non-digit characters
+        normalized = ''.join(filter(str.isdigit, phone))
+        # Remove country code if present (assuming India +91)
+        if normalized.startswith('91') and len(normalized) == 12:
+            normalized = normalized[2:]
+        return normalized
+    
+    def load_users(self) -> bool:
+        """Load all users from Slack workspace"""
+        if not self.bot_token:
+            logger.warning("Slack bot token not configured - cannot lookup users")
+            return False
+        
+        try:
+            logger.info("Loading users from Slack workspace...")
+            
+            response = requests.get(
+                "https://slack.com/api/users.list",
+                headers={"Authorization": f"Bearer {self.bot_token}"},
+                timeout=10
+            )
+            
+            response.raise_for_status()
+            data = response.json()
+            
+            if not data.get('ok'):
+                logger.error(f"Slack API error: {data.get('error')}")
+                return False
+            
+            # Cache users by phone number
+            for member in data.get('members', []):
+                if member.get('deleted') or member.get('is_bot'):
+                    continue
+                
+                profile = member.get('profile', {})
+                phone = profile.get('phone', '')
+                
+                if phone:
+                    normalized_phone = self.normalize_phone(phone)
+                    self.users_cache[normalized_phone] = {
+                        'name': profile.get('real_name', profile.get('display_name', 'Unknown')),
+                        'slack_handle': member.get('name', 'unknown'),
+                        'email': profile.get('email', ''),
+                        'title': profile.get('title', ''),
+                        'department': profile.get('fields', {}).get('department', 'Customer Success')
+                    }
+            
+            self.cache_loaded = True
+            logger.info(f"Loaded {len(self.users_cache)} users from Slack")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to load Slack users: {e}")
+            return False
+    
+    def get_user_by_phone(self, phone: str) -> Optional[Dict[str, str]]:
+        """Look up user in Slack by phone number"""
+        if not self.cache_loaded:
+            self.load_users()
+        
+        normalized = self.normalize_phone(phone)
+        return self.users_cache.get(normalized)
+
+
+# Initialize Slack user lookup
+slack_user_lookup = SlackUserLookup(SLACK_BOT_TOKEN) if SLACK_BOT_TOKEN else None
+
+
 # Slack Formatter
 class SlackFormatter:
     """Format call data for Slack posting in exact format from image"""
@@ -375,12 +461,26 @@ class SlackFormatter:
         """Get agent information from phone number"""
         normalized = SlackFormatter.normalize_phone(phone_number)
         
-        # Check agent mapping
+        # First, try to look up in Slack workspace (if enabled)
+        if slack_user_lookup:
+            slack_user = slack_user_lookup.get_user_by_phone(phone_number)
+            if slack_user:
+                logger.info(f"Found agent in Slack: {slack_user['name']} (@{slack_user['slack_handle']})")
+                return {
+                    "name": slack_user['name'],
+                    "slack_handle": f"@{slack_user['slack_handle']}",
+                    "department": slack_user.get('department', 'Customer Success'),
+                    "team": "Support",
+                    "email": slack_user.get('email', '')
+                }
+        
+        # Fallback: Check agent mapping JSON file
         for mapped_phone, agent_data in AGENT_MAPPING.items():
             if SlackFormatter.normalize_phone(mapped_phone) == normalized:
                 return agent_data
         
-        # Default if not found
+        # Default if not found anywhere
+        logger.warning(f"Agent not found for phone: {phone_number}")
         return {
             "name": "Support Agent",
             "slack_handle": "@support",
@@ -408,7 +508,26 @@ class SlackFormatter:
     
     @staticmethod
     def format_message(call_data: Dict[str, Any], transcription: str) -> str:
-        """Format Slack message"""
+        """
+        Format Slack message in exact format from the image
+        
+        Format:
+        📞 Support Number: ...
+        📱 Candidate/Customer Number: ...
+        👤 CS Agent: @handle
+        🏢 Department: ...
+        ⏰ Timestamp: ...
+        
+        📋 Call Metadata:
+        • Call ID: ...
+        • Duration: ...
+        • Status: ...
+        • Agent: ...
+        • Customer Segment: ...
+        
+        📝 Meeting Minutes (MOM):
+        [AI-generated MOM with minimum 3 lines]
+        """
         
         # Determine call direction
         direction = SlackFormatter.determine_direction(
@@ -424,11 +543,6 @@ class SlackFormatter:
         else:  # incoming
             support_number = call_data['to_number']
             customer_number = call_data['from_number']
-        
-        # Get concern (first 200 characters of transcription or first sentence)
-        concern = transcription[:200] + "..." if len(transcription) > 200 else transcription
-        if '\n' in concern:
-            concern = concern.split('\n')[0]
         
         # Get agent info from phone number or use provided data
         agent_phone = call_data.get('agent_phone')
@@ -468,9 +582,6 @@ class SlackFormatter:
 
 📱 *Candidate/Customer Number:*
 {customer_number}
-
-❗ *Concern:*
-{concern}
 
 👤 *CS Agent:*
 {agent_name} {agent_handle}
@@ -591,13 +702,14 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
 def process_call_background(call_data: Dict[str, Any]):
     """Wrapper to run async processing in background"""
     try:
-        # Create a new event loop for this thread
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
+        # Run the async function in the existing event loop
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # If loop is running, create a task
+            asyncio.create_task(process_call_with_rate_limit(call_data))
+        else:
+            # Otherwise, run it
             loop.run_until_complete(process_call_with_rate_limit(call_data))
-        finally:
-            loop.close()
     except Exception as e:
         logger.error(f"Error in background processing wrapper: {e}")
 
@@ -678,7 +790,7 @@ async def zapier_webhook(
             'recording_url': payload.recording_url,
             'timestamp': payload.timestamp or datetime.utcnow().isoformat(),
             'status': payload.status,
-            'agent_phone': payload.agent_phone,
+            'agent_phone': payload.agent_phone,  # NEW: Phone-based tracking
             'agent_name': payload.agent_name,
             'agent_slack_handle': payload.agent_slack_handle,
             'department': payload.department,
