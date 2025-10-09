@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  exotel-slack-app:
+    build: .
+    container_name: exotel-slack-complete
+    ports:
+      - "8000:8000"
+    environment:
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+      - ASSEMBLYAI_API_KEY=${ASSEMBLYAI_API_KEY}
+      - EXOTEL_API_KEY=${EXOTEL_API_KEY}
+      - EXOTEL_API_TOKEN=${EXOTEL_API_TOKEN}
+      - EXOTEL_SID=${EXOTEL_SID}
+      - SUPPORT_NUMBER=${SUPPORT_NUMBER:-09631084471}
+      - DATABASE_PATH=/app/data/processed_calls.db
+      - PORT=8000
+    volumes:
+      - ./data:/app/data
+      - ./downloads:/app/downloads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  data:
+  downloads:
+
