@@ -702,14 +702,13 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
 def process_call_background(call_data: Dict[str, Any]):
     """Wrapper to run async processing in background"""
     try:
-        # Run the async function in the existing event loop
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # If loop is running, create a task
-            asyncio.create_task(process_call_with_rate_limit(call_data))
-        else:
-            # Otherwise, run it
+        # Create a new event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
             loop.run_until_complete(process_call_with_rate_limit(call_data))
+        finally:
+            loop.close()
     except Exception as e:
         logger.error(f"Error in background processing wrapper: {e}")
 
