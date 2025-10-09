@@ -542,7 +542,7 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
                 db_manager.mark_call_processed(call_data, "No recording available", False)
                 return
             
-            # Download recording
+            # Download recording (blocking I/O, but that's OK in thread pool)
             logger.info(f"Downloading recording for call {call_id}")
             audio_file = transcription_service.download_recording(recording_url, call_id)
             
@@ -591,14 +591,13 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
 def process_call_background(call_data: Dict[str, Any]):
     """Wrapper to run async processing in background"""
     try:
-        # Run the async function in the existing event loop
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # If loop is running, create a task
-            asyncio.create_task(process_call_with_rate_limit(call_data))
-        else:
-            # Otherwise, run it
+        # Create a new event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
             loop.run_until_complete(process_call_with_rate_limit(call_data))
+        finally:
+            loop.close()
     except Exception as e:
         logger.error(f"Error in background processing wrapper: {e}")
 
