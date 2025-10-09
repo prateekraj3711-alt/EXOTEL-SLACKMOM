@@ -7,6 +7,7 @@ import os
 import json
 import logging
 import hashlib
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -44,6 +45,14 @@ DATABASE_PATH = os.environ.get('DATABASE_PATH', 'processed_calls.db')
 
 # Support agent phone number for direction detection
 SUPPORT_NUMBER = os.environ.get('SUPPORT_NUMBER', '09631084471')
+
+# Rate limiting configuration
+PROCESSING_DELAY = int(os.environ.get('PROCESSING_DELAY', '5'))  # seconds between calls
+MAX_CONCURRENT_CALLS = int(os.environ.get('MAX_CONCURRENT_CALLS', '3'))  # parallel processing limit
+
+# Processing queue and semaphore
+processing_semaphore = asyncio.Semaphore(MAX_CONCURRENT_CALLS)
+processing_queue = asyncio.Queue()
 
 # Agent mapping - load from file
 AGENT_MAPPING = {}
@@ -399,30 +408,7 @@ class SlackFormatter:
     
     @staticmethod
     def format_message(call_data: Dict[str, Any], transcription: str) -> str:
-        """
-        Format Slack message in exact format from the image
-        
-        Format:
-        📞 Support Number: ...
-        📱 Candidate/Customer Number: ...
-        ❗ Concern: [First 100 chars of transcription]
-        👤 CS Agent: @handle
-        🏢 Department: ...
-        ⏰ Timestamp: ...
-        
-        📋 Call Metadata:
-        • Call ID: ...
-        • Duration: ...
-        • Status: ...
-        • Agent: ...
-        • Customer Segment: ...
-        
-        📝 Full Transcription:
-        [Complete transcription]
-        
-        🎧 Recording/Voice Note:
-        [Recording available but not displayed per requirements]
-        """
+        """Format Slack message"""
         
         # Determine call direction
         direction = SlackFormatter.determine_direction(
@@ -439,7 +425,7 @@ class SlackFormatter:
             support_number = call_data['to_number']
             customer_number = call_data['from_number']
         
-        # Get concern (first 100 characters of transcription or first sentence)
+        # Get concern (first 200 characters of transcription or first sentence)
         concern = transcription[:200] + "..." if len(transcription) > 200 else transcription
         if '\n' in concern:
             concern = concern.split('\n')[0]
@@ -539,60 +525,82 @@ transcription_service = TranscriptionService(DEEPGRAM_API_KEY) if DEEPGRAM_API_K
 mom_generator = MOMGenerator(OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 
-# Background processing function
-def process_call_background(call_data: Dict[str, Any]):
-    """Process call in background: transcribe and post to Slack"""
+# Background processing function with rate limiting
+async def process_call_with_rate_limit(call_data: Dict[str, Any]):
+    """Process call with rate limiting to prevent server overload"""
     call_id = call_data['call_id']
     
-    try:
-        logger.info(f"Starting background processing for call {call_id}")
-        
-        # Check if recording URL is provided
-        recording_url = call_data.get('recording_url')
-        if not recording_url:
-            logger.warning(f"No recording URL for call {call_id}")
-            db_manager.mark_call_processed(call_data, "No recording available", False)
-            return
-        
-        # Download recording
-        logger.info(f"Downloading recording for call {call_id}")
-        audio_file = transcription_service.download_recording(recording_url, call_id)
-        
-        # Transcribe audio
-        logger.info(f"Transcribing call {call_id}")
-        transcription = transcription_service.transcribe_audio(audio_file)
-        
-        if not transcription or len(transcription.strip()) == 0:
-            raise Exception("Transcription returned empty text")
-        
-        logger.info(f"Transcription completed: {len(transcription)} characters")
-        
-        # Generate MOM from transcription
-        if mom_generator:
-            logger.info(f"Generating MOM for call {call_id}")
-            mom = mom_generator.generate_mom(transcription)
-        else:
-            logger.warning("MOM generator not available, using transcription")
-            mom = transcription
-        
-        # Format and post to Slack
-        logger.info(f"Formatting message for Slack")
-        slack_message = SlackFormatter.format_message(call_data, mom)
-        
-        logger.info(f"Posting to Slack")
-        success = SlackFormatter.post_to_slack(slack_message, SLACK_WEBHOOK_URL)
-        
-        # Mark as processed
-        db_manager.mark_call_processed(call_data, transcription, success)
-        
-        if success:
-            logger.info(f"Successfully completed processing for call {call_id}")
-        else:
-            logger.error(f"Failed to post to Slack for call {call_id}")
+    # Acquire semaphore (wait if max concurrent calls reached)
+    async with processing_semaphore:
+        try:
+            logger.info(f"[Queue] Starting processing for call {call_id}")
             
+            # Check if recording URL is provided
+            recording_url = call_data.get('recording_url')
+            if not recording_url:
+                logger.warning(f"No recording URL for call {call_id}")
+                db_manager.mark_call_processed(call_data, "No recording available", False)
+                return
+            
+            # Download recording
+            logger.info(f"Downloading recording for call {call_id}")
+            audio_file = transcription_service.download_recording(recording_url, call_id)
+            
+            # Transcribe audio
+            logger.info(f"Transcribing call {call_id}")
+            transcription = transcription_service.transcribe_audio(audio_file)
+            
+            if not transcription or len(transcription.strip()) == 0:
+                raise Exception("Transcription returned empty text")
+            
+            logger.info(f"Transcription completed: {len(transcription)} characters")
+            
+            # Generate MOM from transcription
+            if mom_generator:
+                logger.info(f"Generating MOM for call {call_id}")
+                mom = mom_generator.generate_mom(transcription)
+            else:
+                logger.warning("MOM generator not available, using transcription")
+                mom = transcription
+            
+            # Format and post to Slack
+            logger.info(f"Formatting message for Slack")
+            slack_message = SlackFormatter.format_message(call_data, mom)
+            
+            logger.info(f"Posting to Slack")
+            success = SlackFormatter.post_to_slack(slack_message, SLACK_WEBHOOK_URL)
+            
+            # Mark as processed
+            db_manager.mark_call_processed(call_data, transcription, success)
+            
+            if success:
+                logger.info(f"✅ Successfully completed processing for call {call_id}")
+            else:
+                logger.error(f"❌ Failed to post to Slack for call {call_id}")
+            
+            # Add delay before next call (rate limiting)
+            if PROCESSING_DELAY > 0:
+                logger.info(f"⏸️ Waiting {PROCESSING_DELAY} seconds before next call...")
+                await asyncio.sleep(PROCESSING_DELAY)
+                
+        except Exception as e:
+            logger.error(f"❌ Error processing call {call_id}: {e}")
+            db_manager.mark_call_processed(call_data, f"Error: {str(e)}", False)
+
+
+def process_call_background(call_data: Dict[str, Any]):
+    """Wrapper to run async processing in background"""
+    try:
+        # Run the async function in the existing event loop
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # If loop is running, create a task
+            asyncio.create_task(process_call_with_rate_limit(call_data))
+        else:
+            # Otherwise, run it
+            loop.run_until_complete(process_call_with_rate_limit(call_data))
     except Exception as e:
-        logger.error(f"Error processing call {call_id}: {e}")
-        db_manager.mark_call_processed(call_data, f"Error: {str(e)}", False)
+        logger.error(f"Error in background processing wrapper: {e}")
 
 
 # API Endpoints
@@ -671,7 +679,7 @@ async def zapier_webhook(
             'recording_url': payload.recording_url,
             'timestamp': payload.timestamp or datetime.utcnow().isoformat(),
             'status': payload.status,
-            'agent_phone': payload.agent_phone,  # NEW: Phone-based tracking
+            'agent_phone': payload.agent_phone,
             'agent_name': payload.agent_name,
             'agent_slack_handle': payload.agent_slack_handle,
             'department': payload.department,
@@ -762,6 +770,7 @@ async def startup_event():
     logger.info(f"MOM Generator: {'Enabled' if mom_generator else 'Disabled'}")
     logger.info(f"Slack: {'Enabled' if SLACK_WEBHOOK_URL else 'Disabled'}")
     logger.info(f"Support Number: {SUPPORT_NUMBER}")
+    logger.info(f"Rate Limiting: {PROCESSING_DELAY}s delay, {MAX_CONCURRENT_CALLS} concurrent calls")
     logger.info("=" * 60)
     
     # Create directories
