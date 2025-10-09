@@ -35,7 +35,7 @@ app = FastAPI(
 
 # Configuration from environment
 SLACK_WEBHOOK_URL = os.environ.get('SLACK_WEBHOOK_URL')
-ASSEMBLYAI_API_KEY = os.environ.get('ASSEMBLYAI_API_KEY')
+DEEPGRAM_API_KEY = os.environ.get('DEEPGRAM_API_KEY')  # Changed to Deepgram
 EXOTEL_API_KEY = os.environ.get('EXOTEL_API_KEY')
 EXOTEL_API_TOKEN = os.environ.get('EXOTEL_API_TOKEN')
 EXOTEL_SID = os.environ.get('EXOTEL_SID')
@@ -186,15 +186,14 @@ db_manager = DatabaseManager(DATABASE_PATH)
 
 # Transcription Service
 class TranscriptionService:
-    """Handle audio transcription using AssemblyAI"""
+    """Handle audio transcription using Deepgram"""
     
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.upload_url = "https://api.assemblyai.com/v2/upload"
-        self.transcript_url = "https://api.assemblyai.com/v2/transcript"
+        self.api_url = "https://api.deepgram.com/v1/listen"
         self.headers = {
-            "authorization": self.api_key,
-            "content-type": "application/json"
+            "Authorization": f"Token {self.api_key}",
+            "Content-Type": "audio/mpeg"
         }
     
     def download_recording(self, recording_url: str, call_id: str) -> str:
@@ -223,80 +222,84 @@ class TranscriptionService:
             raise
     
     def transcribe_audio(self, audio_file_path: str) -> str:
-        """Transcribe audio file using AssemblyAI"""
+        """Transcribe audio file using Deepgram"""
         try:
-            # Upload audio file
-            logger.info("Uploading audio to AssemblyAI...")
-            with open(audio_file_path, 'rb') as f:
-                upload_response = requests.post(
-                    self.upload_url,
-                    headers={"authorization": self.api_key},
-                    data=f,
-                    timeout=120
-                )
-            upload_response.raise_for_status()
-            audio_url = upload_response.json()['upload_url']
+            logger.info("Transcribing audio with Deepgram...")
             
-            # Request transcription with speaker labels
-            logger.info("Requesting transcription...")
-            transcript_request = {
-                "audio_url": audio_url,
-                "speaker_labels": True,
-                "speakers_expected": 2  # Typically customer and agent
+            # Prepare Deepgram API parameters
+            params = {
+                "model": "nova-2",  # Latest Deepgram model
+                "smart_format": "true",  # Auto-formatting
+                "diarize": "true",  # Speaker detection
+                "punctuate": "true",  # Add punctuation
+                "language": "en",  # English
+                "tier": "enhanced"  # Better quality
             }
             
-            transcript_response = requests.post(
-                self.transcript_url,
-                json=transcript_request,
-                headers=self.headers,
-                timeout=30
-            )
-            transcript_response.raise_for_status()
-            transcript_id = transcript_response.json()['id']
-            
-            # Poll for completion
-            logger.info(f"Polling for transcription completion (ID: {transcript_id})...")
-            import time
-            max_attempts = 60
-            
-            for attempt in range(max_attempts):
-                status_response = requests.get(
-                    f"{self.transcript_url}/{transcript_id}",
+            # Read and send audio file
+            with open(audio_file_path, 'rb') as audio_file:
+                response = requests.post(
+                    self.api_url,
                     headers=self.headers,
-                    timeout=30
+                    params=params,
+                    data=audio_file,
+                    timeout=120
                 )
-                status_response.raise_for_status()
-                result = status_response.json()
+            
+            response.raise_for_status()
+            result = response.json()
+            
+            # Extract transcription with speaker labels
+            if 'results' in result and 'channels' in result['results']:
+                channel = result['results']['channels'][0]
                 
-                status = result['status']
-                
-                if status == 'completed':
-                    logger.info("Transcription completed successfully")
+                if 'alternatives' in channel and len(channel['alternatives']) > 0:
+                    alternative = channel['alternatives'][0]
                     
-                    # Get speaker-labeled transcript
-                    if result.get('utterances'):
-                        # Format with speaker labels
+                    # Check for speaker diarization (words with speaker info)
+                    if 'words' in alternative and alternative['words']:
+                        # Group words by speaker
                         transcript_lines = []
-                        for utterance in result['utterances']:
-                            speaker = f"Speaker {utterance['speaker']}"
-                            text = utterance['text']
-                            transcript_lines.append(f"{speaker}: {text}")
+                        current_speaker = None
+                        current_text = []
+                        
+                        for word_info in alternative['words']:
+                            speaker = word_info.get('speaker', 0)
+                            word = word_info.get('punctuated_word', word_info.get('word', ''))
+                            
+                            if current_speaker is None:
+                                current_speaker = speaker
+                            
+                            if speaker != current_speaker:
+                                # New speaker, save previous line
+                                if current_text:
+                                    transcript_lines.append(
+                                        f"Speaker {current_speaker}: {' '.join(current_text)}"
+                                    )
+                                current_speaker = speaker
+                                current_text = [word]
+                            else:
+                                current_text.append(word)
+                        
+                        # Add last line
+                        if current_text:
+                            transcript_lines.append(
+                                f"Speaker {current_speaker}: {' '.join(current_text)}"
+                            )
+                        
                         transcription = "\n".join(transcript_lines)
                     else:
-                        transcription = result.get('text', '')
+                        # No speaker info, use plain transcript
+                        transcription = alternative.get('transcript', '')
                     
-                    return transcription
-                    
-                elif status == 'error':
-                    error_msg = result.get('error', 'Unknown error')
-                    raise Exception(f"Transcription failed: {error_msg}")
-                
-                time.sleep(3)
+                    if transcription:
+                        logger.info(f"Transcription completed: {len(transcription)} characters")
+                        return transcription
             
-            raise Exception("Transcription timeout - exceeded maximum polling attempts")
+            raise Exception("No transcription results from Deepgram")
             
         except Exception as e:
-            logger.error(f"Transcription error: {e}")
+            logger.error(f"Deepgram transcription error: {e}")
             raise
         finally:
             # Cleanup downloaded file
@@ -494,7 +497,7 @@ Recording processed and transcribed above (as per no-audio requirement)"""
 
 
 # Initialize services
-transcription_service = TranscriptionService(ASSEMBLYAI_API_KEY) if ASSEMBLYAI_API_KEY else None
+transcription_service = TranscriptionService(DEEPGRAM_API_KEY) if DEEPGRAM_API_KEY else None
 
 
 # Background processing function
