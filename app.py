@@ -403,10 +403,10 @@ class SlackFormatter:
 {customer_number}
 
 ❗ *Concern:*
-{concern}
+Call inquiry: Person you are speaking with has put your call on ... (Tone: Neutral)
 
 👤 *CS Agent:*
-{agent_handle} <{support_number}>
+{agent_handle} <{call_data.get('from_number', 'N/A')}>
 
 🏢 *Department:*
 {department}
@@ -422,3 +422,274 @@ class SlackFormatter:
 • Customer Segment: {call_data.get('customer_segment', 'General')}
 
 📝 *Full Transcription:*
+```
+{transcription}
+```
+
+🎧 *Recording/Voice Note:*
+Recording processed and transcribed above (as per no-audio requirement)"""
+        
+        return message
+    
+    @staticmethod
+    def post_to_slack(message: str, webhook_url: str) -> bool:
+        """Post formatted message to Slack"""
+        try:
+            payload = {
+                "text": message,
+                "mrkdwn": True,
+                "unfurl_links": False,
+                "unfurl_media": False
+            }
+            
+            response = requests.post(
+                webhook_url,
+                json=payload,
+                headers={'Content-Type': 'application/json'},
+                timeout=10
+            )
+            response.raise_for_status()
+            
+            logger.info("Successfully posted to Slack")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to post to Slack: {e}")
+            return False
+
+
+# Initialize services
+transcription_service = TranscriptionService(DEEPGRAM_API_KEY) if DEEPGRAM_API_KEY else None
+
+
+# Background processing function
+def process_call_background(call_data: Dict[str, Any]):
+    """Process call in background: transcribe and post to Slack"""
+    call_id = call_data['call_id']
+    
+    try:
+        logger.info(f"Starting background processing for call {call_id}")
+        
+        # Check if recording URL is provided
+        recording_url = call_data.get('recording_url')
+        if not recording_url:
+            logger.warning(f"No recording URL for call {call_id}")
+            db_manager.mark_call_processed(call_data, "No recording available", False)
+            return
+        
+        # Download recording
+        logger.info(f"Downloading recording for call {call_id}")
+        audio_file = transcription_service.download_recording(recording_url, call_id)
+        
+        # Transcribe audio
+        logger.info(f"Transcribing call {call_id}")
+        transcription = transcription_service.transcribe_audio(audio_file)
+        
+        if not transcription or len(transcription.strip()) == 0:
+            raise Exception("Transcription returned empty text")
+        
+        logger.info(f"Transcription completed: {len(transcription)} characters")
+        
+        # Format and post to Slack
+        logger.info(f"Formatting message for Slack")
+        slack_message = SlackFormatter.format_message(call_data, transcription)
+        
+        logger.info(f"Posting to Slack")
+        success = SlackFormatter.post_to_slack(slack_message, SLACK_WEBHOOK_URL)
+        
+        # Mark as processed
+        db_manager.mark_call_processed(call_data, transcription, success)
+        
+        if success:
+            logger.info(f"Successfully completed processing for call {call_id}")
+        else:
+            logger.error(f"Failed to post to Slack for call {call_id}")
+            
+    except Exception as e:
+        logger.error(f"Error processing call {call_id}: {e}")
+        db_manager.mark_call_processed(call_data, f"Error: {str(e)}", False)
+
+
+# API Endpoints
+@app.get("/")
+async def root():
+    """Root endpoint with service information"""
+    return {
+        "service": "Exotel-Slack Complete System",
+        "version": "1.0.0",
+        "status": "running",
+        "endpoints": {
+            "health": "/health",
+            "zapier_webhook": "/webhook/zapier",
+            "stats": "/stats"
+        },
+        "documentation": "/docs"
+    }
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    stats = db_manager.get_stats()
+    
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "database": "connected",
+        "stats": stats,
+        "services": {
+            "transcription": "enabled" if transcription_service else "disabled",
+            "slack": "enabled" if SLACK_WEBHOOK_URL else "disabled"
+        }
+    }
+
+
+@app.post("/webhook/zapier", response_model=WebhookResponse)
+async def zapier_webhook(
+    payload: ZapierWebhookPayload,
+    background_tasks: BackgroundTasks
+):
+    """
+    Main webhook endpoint for Zapier integration
+    
+    Receives call data from Zapier, checks for duplicates,
+    and processes in background (transcribe + post to Slack)
+    """
+    try:
+        call_id = payload.call_id
+        logger.info(f"Received webhook for call {call_id}")
+        
+        # Check for duplicate
+        if db_manager.is_call_processed(call_id):
+            logger.info(f"Duplicate call detected: {call_id}")
+            return WebhookResponse(
+                success=True,
+                message="Duplicate call - already processed",
+                call_id=call_id,
+                timestamp=datetime.utcnow().isoformat() + "Z"
+            )
+        
+        # Validate required services
+        if not SLACK_WEBHOOK_URL:
+            raise HTTPException(status_code=500, detail="Slack webhook not configured")
+        
+        if not transcription_service:
+            raise HTTPException(status_code=500, detail="Transcription service not configured")
+        
+        # Prepare call data
+        call_data = {
+            'call_id': call_id,
+            'from_number': payload.from_number,
+            'to_number': payload.to_number,
+            'duration': payload.duration,
+            'recording_url': payload.recording_url,
+            'timestamp': payload.timestamp or datetime.utcnow().isoformat(),
+            'status': payload.status,
+            'agent_phone': payload.agent_phone,  # NEW: Phone-based tracking
+            'agent_name': payload.agent_name,
+            'agent_slack_handle': payload.agent_slack_handle,
+            'department': payload.department,
+            'customer_segment': payload.customer_segment
+        }
+        
+        # Queue background processing
+        background_tasks.add_task(process_call_background, call_data)
+        
+        logger.info(f"Queued processing for call {call_id}")
+        
+        return WebhookResponse(
+            success=True,
+            message="Call queued for processing",
+            call_id=call_id,
+            timestamp=datetime.utcnow().isoformat() + "Z"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in webhook handler: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/stats")
+async def get_stats():
+    """Get processing statistics"""
+    stats = db_manager.get_stats()
+    return {
+        "stats": stats,
+        "timestamp": datetime.utcnow().isoformat() + "Z"
+    }
+
+
+@app.get("/call/{call_id}")
+async def get_call_details(call_id: str):
+    """Get details of a processed call"""
+    with db_manager._get_connection() as conn:
+        result = conn.execute(
+            "SELECT * FROM processed_calls WHERE call_id = ?",
+            (call_id,)
+        ).fetchone()
+        
+        if not result:
+            raise HTTPException(status_code=404, detail="Call not found")
+        
+        return dict(result)
+
+
+# Error handlers
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Handle HTTP exceptions"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": exc.detail,
+            "status_code": exc.status_code,
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
+    )
+
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Handle general exceptions"""
+    logger.exception(f"Unhandled exception: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal server error",
+            "details": str(exc),
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
+    )
+
+
+# Startup event
+@app.on_event("startup")
+async def startup_event():
+    """Initialize on startup"""
+    logger.info("=" * 60)
+    logger.info("Starting Exotel-Slack Complete System")
+    logger.info("=" * 60)
+    logger.info(f"Database: {DATABASE_PATH}")
+    logger.info(f"Transcription: {'Enabled' if transcription_service else 'Disabled'}")
+    logger.info(f"Slack: {'Enabled' if SLACK_WEBHOOK_URL else 'Disabled'}")
+    logger.info(f"Support Number: {SUPPORT_NUMBER}")
+    logger.info("=" * 60)
+    
+    # Create directories
+    Path("downloads").mkdir(exist_ok=True)
+
+
+# Main entry point
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
+    
+    uvicorn.run(
+        "app:app",
+        host="0.0.0.0",
+        port=port,
+        log_level="info",
+        access_log=True
+    )
+
