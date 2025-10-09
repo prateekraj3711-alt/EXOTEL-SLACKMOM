@@ -378,9 +378,11 @@ class SlackFormatter:
             agent_handle = call_data.get('agent_slack_handle', '@support')
             department = call_data.get('department', 'Customer Success')
         
-        # Ensure agent handle has @
-        if not agent_handle.startswith('@'):
-            agent_handle = f"@{agent_handle}"
+        # Ensure agent handle has @ and is not None
+if agent_handle and not agent_handle.startswith('@'):
+    agent_handle = f"@{agent_handle}"
+elif not agent_handle:
+    agent_handle = '@support'
         
         # Format timestamp
         timestamp = call_data.get('timestamp', datetime.utcnow().isoformat())
@@ -692,4 +694,5 @@ if __name__ == "__main__":
         log_level="info",
         access_log=True
     )
+
 
