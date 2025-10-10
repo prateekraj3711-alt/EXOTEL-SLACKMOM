@@ -6,8 +6,8 @@ Automated call recording transcription and Slack posting with Zapier integration
 import os
 import json
 import logging
-import hashlib
 import asyncio
+import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -38,7 +38,7 @@ app = FastAPI(
 # Configuration from environment
 SLACK_WEBHOOK_URL = os.environ.get('SLACK_WEBHOOK_URL')
 SLACK_BOT_TOKEN = os.environ.get('SLACK_BOT_TOKEN')
-OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')  # Used for both transcription AND MOM
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 EXOTEL_API_KEY = os.environ.get('EXOTEL_API_KEY')
 EXOTEL_API_TOKEN = os.environ.get('EXOTEL_API_TOKEN')
 EXOTEL_SID = os.environ.get('EXOTEL_SID')
@@ -51,9 +51,8 @@ SUPPORT_NUMBER = os.environ.get('SUPPORT_NUMBER', '09631084471')
 PROCESSING_DELAY = int(os.environ.get('PROCESSING_DELAY', '5'))
 MAX_CONCURRENT_CALLS = int(os.environ.get('MAX_CONCURRENT_CALLS', '3'))
 
-# Processing queue and semaphore
-processing_semaphore = asyncio.Semaphore(MAX_CONCURRENT_CALLS)
-processing_queue = asyncio.Queue()
+# Processing semaphore (use threading.Semaphore for cross-thread compatibility)
+processing_semaphore = threading.Semaphore(MAX_CONCURRENT_CALLS)
 
 # Agent mapping - load from file
 AGENT_MAPPING = {}
@@ -655,64 +654,75 @@ transcription_service = TranscriptionService(OPENAI_API_KEY) if OPENAI_API_KEY e
 mom_generator = MOMGenerator(OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 
-# Background processing
+# Background processing with threading semaphore
 async def process_call_with_rate_limit(call_data: Dict[str, Any]):
-    """Process call with rate limiting"""
+    """Process call with rate limiting to prevent server overload"""
     call_id = call_data['call_id']
     
-    async with processing_semaphore:
-        try:
-            logger.info(f"[Queue] Starting processing for call {call_id}")
+    # Acquire semaphore (wait if max concurrent calls reached)
+    processing_semaphore.acquire()
+    try:
+        logger.info(f"[Queue] Starting processing for call {call_id}")
+        
+        # Check if recording URL is provided
+        recording_url = call_data.get('recording_url')
+        if not recording_url:
+            logger.warning(f"No recording URL for call {call_id}")
+            db_manager.mark_call_processed(call_data, "No recording available", False)
+            return
+        
+        # Download recording
+        logger.info(f"Downloading recording for call {call_id}")
+        audio_file = transcription_service.download_recording(recording_url, call_id)
+        
+        # Transcribe audio
+        logger.info(f"Transcribing call {call_id}")
+        transcription = transcription_service.transcribe_audio(audio_file)
+        
+        if not transcription or len(transcription.strip()) == 0:
+            raise Exception("Transcription returned empty text")
+        
+        logger.info(f"Transcription completed: {len(transcription)} characters")
+        
+        # Generate MOM from transcription
+        if mom_generator:
+            logger.info(f"Generating MOM for call {call_id}")
+            mom = mom_generator.generate_mom(transcription)
+        else:
+            logger.warning("MOM generator not available, using transcription")
+            mom = transcription
+        
+        # Format and post to Slack
+        logger.info(f"Formatting message for Slack")
+        slack_message = SlackFormatter.format_message(call_data, mom)
+        
+        logger.info(f"Posting to Slack")
+        success = SlackFormatter.post_to_slack(slack_message, SLACK_WEBHOOK_URL)
+        
+        # Mark as processed
+        db_manager.mark_call_processed(call_data, transcription, success)
+        
+        if success:
+            logger.info(f"✅ Successfully completed processing for call {call_id}")
+        else:
+            logger.error(f"❌ Failed to post to Slack for call {call_id}")
+        
+        # Add delay before next call (rate limiting)
+        if PROCESSING_DELAY > 0:
+            logger.info(f"⏸️ Waiting {PROCESSING_DELAY} seconds before next call...")
+            await asyncio.sleep(PROCESSING_DELAY)
             
-            recording_url = call_data.get('recording_url')
-            if not recording_url:
-                logger.warning(f"No recording URL for call {call_id}")
-                db_manager.mark_call_processed(call_data, "No recording available", False)
-                return
-            
-            logger.info(f"Downloading recording for call {call_id}")
-            audio_file = transcription_service.download_recording(recording_url, call_id)
-            
-            logger.info(f"Transcribing call {call_id}")
-            transcription = transcription_service.transcribe_audio(audio_file)
-            
-            if not transcription or len(transcription.strip()) == 0:
-                raise Exception("Transcription returned empty text")
-            
-            logger.info(f"Transcription completed: {len(transcription)} characters")
-            
-            if mom_generator:
-                logger.info(f"Generating MOM for call {call_id}")
-                mom = mom_generator.generate_mom(transcription)
-            else:
-                logger.warning("MOM generator not available, using transcription")
-                mom = transcription
-            
-            logger.info(f"Formatting message for Slack")
-            slack_message = SlackFormatter.format_message(call_data, mom)
-            
-            logger.info(f"Posting to Slack")
-            success = SlackFormatter.post_to_slack(slack_message, SLACK_WEBHOOK_URL)
-            
-            db_manager.mark_call_processed(call_data, transcription, success)
-            
-            if success:
-                logger.info(f"✅ Successfully completed processing for call {call_id}")
-            else:
-                logger.error(f"❌ Failed to post to Slack for call {call_id}")
-            
-            if PROCESSING_DELAY > 0:
-                logger.info(f"⏸️ Waiting {PROCESSING_DELAY} seconds before next call...")
-                await asyncio.sleep(PROCESSING_DELAY)
-                
-        except Exception as e:
-            logger.error(f"❌ Error processing call {call_id}: {e}")
-            db_manager.mark_call_processed(call_data, f"Error: {str(e)}", False)
+    except Exception as e:
+        logger.error(f"❌ Error processing call {call_id}: {e}")
+        db_manager.mark_call_processed(call_data, f"Error: {str(e)}", False)
+    finally:
+        processing_semaphore.release()
 
 
 def process_call_background(call_data: Dict[str, Any]):
     """Wrapper to run async processing in background"""
     try:
+        # Create a new event loop for this thread
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
