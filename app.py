@@ -1,6 +1,7 @@
 """
 Exotel to Slack Complete System
 Automated call recording transcription and Slack posting with Zapier integration
+SMART AGENT DETECTION: Matches from_number OR to_number against agent database
 """
 
 import os
@@ -31,8 +32,8 @@ logger = logging.getLogger(__name__)
 # Initialize FastAPI
 app = FastAPI(
     title="Exotel-Slack Complete System",
-    description="Automated call transcription and Slack posting with duplicate prevention",
-    version="1.0.0"
+    description="Automated call transcription and Slack posting with smart agent detection",
+    version="2.0.0"
 )
 
 # Configuration from environment
@@ -65,7 +66,7 @@ def load_agent_mapping():
             with open(agent_file, 'r') as f:
                 data = json.load(f)
                 AGENT_MAPPING = {k: v for k, v in data.items() if not k.startswith('_')}
-            logger.info(f"Loaded {len(AGENT_MAPPING)} agent mappings")
+            logger.info(f"✅ Loaded {len(AGENT_MAPPING)} agent mappings from database")
         else:
             logger.warning("agent_mapping.json not found - using default mappings")
     except Exception as e:
@@ -328,7 +329,10 @@ Analyze this call transcription and create a structured MOM with these sections:
 [Summarize the main problem/concern the customer is reporting - minimum 1 line]
 
 **Key Discussion Points:**
-[List at least 2-3 main points discussed in the call - each point on a new line]
+[Extract ACTUAL QUOTES and statements from the real conversation - DO NOT rephrase or paraphrase]
+[Use direct quotes from what was actually said in the call]
+[Example: "Customer mentioned: 'I'm having trouble with...'" or "Agent explained: 'You need to...'"]
+[List at least 2-3 actual discussion points from the conversation - each on a new line]
 
 **Action Items:**
 [List specific actions needed to resolve this issue - each action on a new line]
@@ -336,16 +340,17 @@ Analyze this call transcription and create a structured MOM with these sections:
 **Resolution Status:**
 [State if issue was resolved or pending]
 
-IMPORTANT: 
+CRITICAL REQUIREMENTS: 
 - The MOM must have AT LEAST 3 substantial lines of content
+- For "Key Discussion Points" - USE ACTUAL WORDS from the conversation, NOT rephrased summaries
+- Include direct quotes or verbatim statements whenever possible
 - Each section should be detailed and informative
-- Do not make it too brief - provide enough context
 - Include specific details from the transcription
 
 Transcription:
 {transcription}
 
-Create the MOM in a clear, professional format with sufficient detail."""
+Create the MOM in a clear, professional format with actual conversation content."""
 
                 payload = {
                     "model": "gpt-3.5-turbo",
@@ -432,8 +437,12 @@ class SlackUserLookup:
     def normalize_phone(self, phone: str) -> str:
         """Normalize phone number for comparison"""
         normalized = ''.join(filter(str.isdigit, phone))
+        # Remove country code +91
         if normalized.startswith('91') and len(normalized) == 12:
             normalized = normalized[2:]
+        # Remove leading 0
+        if normalized.startswith('0') and len(normalized) == 11:
+            normalized = normalized[1:]
         return normalized
     
     def load_users(self) -> bool:
@@ -470,13 +479,14 @@ class SlackUserLookup:
                     self.users_cache[normalized_phone] = {
                         'name': profile.get('real_name', profile.get('display_name', 'Unknown')),
                         'slack_handle': member.get('name', 'unknown'),
+                        'user_id': member.get('id', ''),  # SLACK USER ID FOR TAGGING
                         'email': profile.get('email', ''),
                         'title': profile.get('title', ''),
                         'department': profile.get('fields', {}).get('department', 'Customer Success')
                     }
             
             self.cache_loaded = True
-            logger.info(f"Loaded {len(self.users_cache)} users from Slack")
+            logger.info(f"✅ Loaded {len(self.users_cache)} users from Slack workspace")
             return True
             
         except Exception as e:
@@ -489,7 +499,12 @@ class SlackUserLookup:
             self.load_users()
         
         normalized = self.normalize_phone(phone)
-        return self.users_cache.get(normalized)
+        user = self.users_cache.get(normalized)
+        
+        if user:
+            logger.info(f"📧 Found Slack user: {user['name']} ({user['email']}) - Will tag as <@{user['user_id']}>")
+        
+        return user
 
 
 slack_user_lookup = SlackUserLookup(SLACK_BOT_TOKEN) if SLACK_BOT_TOKEN else None
@@ -497,90 +512,159 @@ slack_user_lookup = SlackUserLookup(SLACK_BOT_TOKEN) if SLACK_BOT_TOKEN else Non
 
 # Slack Formatter
 class SlackFormatter:
-    """Format call data for Slack posting"""
+    """Format call data for Slack posting with smart agent detection"""
     
     @staticmethod
     def normalize_phone(phone: str) -> str:
         """Normalize phone number for comparison"""
-        return phone.replace('+', '').replace('-', '').replace(' ', '').replace('(', '').replace(')', '')
+        normalized = phone.replace('+', '').replace('-', '').replace(' ', '').replace('(', '').replace(')', '')
+        # Remove country code +91
+        if normalized.startswith('91') and len(normalized) == 12:
+            normalized = normalized[2:]
+        # Remove leading 0
+        if normalized.startswith('0') and len(normalized) == 11:
+            normalized = normalized[1:]
+        return normalized
     
     @staticmethod
-    def get_agent_info(phone_number: str) -> Dict[str, str]:
-        """Get agent information from phone number"""
-        normalized = SlackFormatter.normalize_phone(phone_number)
-        
-        if slack_user_lookup:
-            slack_user = slack_user_lookup.get_user_by_phone(phone_number)
-            if slack_user:
-                logger.info(f"Found agent in Slack: {slack_user['name']} (@{slack_user['slack_handle']})")
-                return {
-                    "name": slack_user['name'],
-                    "slack_handle": f"@{slack_user['slack_handle']}",
-                    "department": slack_user.get('department', 'Customer Success'),
-                    "team": "Support",
-                    "email": slack_user.get('email', '')
-                }
-        
-        for mapped_phone, agent_data in AGENT_MAPPING.items():
-            if SlackFormatter.normalize_phone(mapped_phone) == normalized:
-                return agent_data
-        
-        logger.warning(f"Agent not found for phone: {phone_number}")
-        return {
-            "name": "Support Agent",
-            "slack_handle": "@support",
-            "department": "Customer Success",
-            "team": "Support"
-        }
-    
-    @staticmethod
-    def determine_direction(from_number: str, to_number: str, support_number: str) -> str:
-        """Determine call direction based on phone numbers"""
+    def find_agent_from_call(from_number: str, to_number: str) -> Optional[Dict[str, str]]:
+        """
+        SMART AGENT DETECTION:
+        Check both from_number and to_number against agent database.
+        Returns agent info if found, None otherwise.
+        """
         from_clean = SlackFormatter.normalize_phone(from_number)
         to_clean = SlackFormatter.normalize_phone(to_number)
-        support_clean = SlackFormatter.normalize_phone(support_number)
         
-        for mapped_phone in AGENT_MAPPING.keys():
-            if SlackFormatter.normalize_phone(mapped_phone) == from_clean:
-                return "outgoing"
+        logger.info(f"🔍 Checking for agent match:")
+        logger.info(f"   From: {from_number} (normalized: {from_clean})")
+        logger.info(f"   To: {to_number} (normalized: {to_clean})")
         
-        if support_clean in from_clean:
-            return "outgoing"
-        else:
-            return "incoming"
+        # First, try Slack workspace lookup for both numbers
+        if slack_user_lookup:
+            # Check from_number in Slack
+            slack_user = slack_user_lookup.get_user_by_phone(from_number)
+            if slack_user:
+                user_id = slack_user.get('user_id', '')
+                email = slack_user.get('email', '')
+                slack_mention = f"<@{user_id}>" if user_id else f"({email})"
+                
+                logger.info(f"✅ Found agent (from_number) in Slack: {slack_user['name']} - {email}")
+                return {
+                    "phone": from_number,
+                    "name": slack_user['name'],
+                    "slack_mention": slack_mention,
+                    "email": email,
+                    "user_id": user_id,
+                    "department": slack_user.get('department', 'Customer Success'),
+                    "team": "Support",
+                    "direction": "outgoing"  # Agent is caller
+                }
+            
+            # Check to_number in Slack
+            slack_user = slack_user_lookup.get_user_by_phone(to_number)
+            if slack_user:
+                user_id = slack_user.get('user_id', '')
+                email = slack_user.get('email', '')
+                slack_mention = f"<@{user_id}>" if user_id else f"({email})"
+                
+                logger.info(f"✅ Found agent (to_number) in Slack: {slack_user['name']} - {email}")
+                return {
+                    "phone": to_number,
+                    "name": slack_user['name'],
+                    "slack_mention": slack_mention,
+                    "email": email,
+                    "user_id": user_id,
+                    "department": slack_user.get('department', 'Customer Success'),
+                    "team": "Support",
+                    "direction": "incoming"  # Agent is receiver
+                }
+        
+        # Check agent_mapping.json database (97 agents)
+        for mapped_phone, agent_data in AGENT_MAPPING.items():
+            mapped_clean = SlackFormatter.normalize_phone(mapped_phone)
+            
+            # Check if from_number matches
+            if mapped_clean == from_clean:
+                email = agent_data.get('email', '')
+                slack_mention = f"<@{email}>" if email else "@support"
+                
+                logger.info(f"✅ Found agent (from_number) in database: {agent_data.get('name')} - {email}")
+                return {
+                    "phone": from_number,
+                    "name": agent_data.get('name', 'Support Agent'),
+                    "slack_mention": slack_mention,
+                    "email": email,
+                    "user_id": "",
+                    "department": agent_data.get('department', 'Customer Success'),
+                    "team": agent_data.get('team', 'Support'),
+                    "direction": "outgoing"  # Agent is caller
+                }
+            
+            # Check if to_number matches
+            if mapped_clean == to_clean:
+                email = agent_data.get('email', '')
+                slack_mention = f"<@{email}>" if email else "@support"
+                
+                logger.info(f"✅ Found agent (to_number) in database: {agent_data.get('name')} - {email}")
+                return {
+                    "phone": to_number,
+                    "name": agent_data.get('name', 'Support Agent'),
+                    "slack_mention": slack_mention,
+                    "email": email,
+                    "user_id": "",
+                    "department": agent_data.get('department', 'Customer Success'),
+                    "team": agent_data.get('team', 'Support'),
+                    "direction": "incoming"  # Agent is receiver
+                }
+        
+        # No agent found - return None
+        logger.warning(f"⚠️ No agent found for from: {from_number} or to: {to_number}")
+        return None
     
     @staticmethod
     def format_message(call_data: Dict[str, Any], transcription: str) -> str:
-        """Format Slack message"""
+        """Format Slack message with smart agent detection and email tagging"""
         
-        direction = SlackFormatter.determine_direction(
+        # SMART DETECTION: Find which number belongs to support agent
+        agent_info = SlackFormatter.find_agent_from_call(
             call_data['from_number'],
-            call_data['to_number'],
-            SUPPORT_NUMBER
+            call_data['to_number']
         )
         
-        if direction == "outgoing":
-            support_number = call_data['from_number']
-            customer_number = call_data['to_number']
-        else:
-            support_number = call_data['to_number']
-            customer_number = call_data['from_number']
-        
-        agent_phone = call_data.get('agent_phone')
-        if agent_phone:
-            agent_info = SlackFormatter.get_agent_info(agent_phone)
+        if agent_info:
+            # Agent found in database
+            agent_phone = agent_info['phone']
             agent_name = agent_info['name']
-            agent_handle = agent_info['slack_handle']
+            agent_mention = agent_info['slack_mention']
+            agent_email = agent_info.get('email', '')
             department = agent_info['department']
+            direction = agent_info['direction']
+            
+            # Determine support vs customer number based on which one is the agent
+            if direction == "outgoing":
+                support_number = call_data['from_number']
+                customer_number = call_data['to_number']
+            else:
+                support_number = call_data['to_number']
+                customer_number = call_data['from_number']
+            
+            logger.info(f"📊 Call Summary: Agent={agent_name}, Direction={direction}")
         else:
-            agent_name = call_data.get('agent_name', 'Support Agent')
-            agent_handle = call_data.get('agent_slack_handle', '@support')
+            # No agent found - use fallback
+            logger.warning(f"⚠️ No agent found in database for call {call_data['call_id']}")
+            logger.warning(f"   From: {call_data['from_number']}")
+            logger.warning(f"   To: {call_data['to_number']}")
+            logger.warning(f"   💡 TIP: Add these numbers to agent_mapping.json if they are agents")
+            
+            # Assume incoming call (customer called support) as default
+            support_number = call_data.get('to_number', 'Unknown')
+            customer_number = call_data.get('from_number', 'Unknown')
+            agent_name = call_data.get('agent_name', 'Unknown Agent')
+            agent_mention = '@support'
+            agent_email = call_data.get('agent_email', '')
             department = call_data.get('department', 'Customer Success')
-        
-        if agent_handle and not agent_handle.startswith('@'):
-            agent_handle = f"@{agent_handle}"
-        elif not agent_handle:
-            agent_handle = '@support'
+            direction = "incoming"  # Default assumption
         
         # Format timestamp - CONVERT TO IST
         timestamp = call_data.get('timestamp', datetime.utcnow().isoformat())
@@ -595,14 +679,42 @@ class SlackFormatter:
         duration_sec = call_data.get('duration', 0)
         duration_formatted = f"{duration_sec}s"
         
-        message = f"""📞 *Support Number:*
+        # Build agent line with email
+        if agent_info:
+            # Agent was found in database
+            if agent_email:
+                agent_line = f"{agent_name} {agent_mention}\n📧 *Email:* {agent_email}"
+            else:
+                agent_line = f"{agent_name} {agent_mention}"
+        else:
+            # Agent NOT found in database
+            agent_line = f"⚠️ *Unknown Agent* {agent_mention}\n💡 *Note:* Phone numbers not found in agent database\n📞 *From:* {call_data['from_number']}\n📞 *To:* {call_data['to_number']}"
+        
+        # Direction text - show who called whom
+        if direction == "outgoing":
+            direction_emoji = "📞➡️"
+            direction_text = f"{agent_name} (Agent) called {customer_number} (Customer)"
+            call_summary = "**Agent called Customer**"
+        elif direction == "incoming":
+            direction_emoji = "📱➡️"
+            direction_text = f"{customer_number} (Customer) called {agent_name} (Agent)"
+            call_summary = "**Customer called Agent**"
+        else:
+            direction_emoji = "📞"
+            direction_text = "Unknown direction"
+            call_summary = "**Direction unknown**"
+        
+        message = f"""{direction_emoji} *{call_summary}*
+{direction_text}
+
+📞 *Support Number:*
 {support_number}
 
 📱 *Candidate/Customer Number:*
 {customer_number}
 
 👤 *CS Agent:*
-{agent_name} {agent_handle}
+{agent_line}
 
 🏢 *Department:*
 {department}
@@ -641,11 +753,11 @@ class SlackFormatter:
             )
             response.raise_for_status()
             
-            logger.info("Successfully posted to Slack")
+            logger.info("✅ Successfully posted to Slack with user mentions")
             return True
             
         except Exception as e:
-            logger.error(f"Failed to post to Slack: {e}")
+            logger.error(f"❌ Failed to post to Slack: {e}")
             return False
 
 
@@ -739,8 +851,17 @@ async def root():
     """Root endpoint"""
     return {
         "service": "Exotel-Slack Complete System",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "status": "running",
+        "features": [
+            "Smart Agent Detection (97 agents)",
+            "OpenAI Whisper Transcription",
+            "AI MOM Generation",
+            "Slack User Tagging by Phone & Email",
+            "Duplicate Prevention",
+            "IST Timezone Support"
+        ],
+        "agents_loaded": len(AGENT_MAPPING),
         "endpoints": {
             "health": "/health",
             "zapier_webhook": "/webhook/zapier",
@@ -759,11 +880,14 @@ async def health_check():
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "database": "connected",
+        "agents_loaded": len(AGENT_MAPPING),
         "stats": stats,
         "services": {
             "transcription": "enabled (OpenAI Whisper)" if transcription_service else "disabled",
             "mom_generator": "enabled" if mom_generator else "disabled",
-            "slack": "enabled" if SLACK_WEBHOOK_URL else "disabled"
+            "slack": "enabled" if SLACK_WEBHOOK_URL else "disabled",
+            "slack_user_lookup": "enabled" if slack_user_lookup else "disabled (set SLACK_BOT_TOKEN)",
+            "agent_database": f"{len(AGENT_MAPPING)} agents loaded"
         }
     }
 
@@ -776,7 +900,9 @@ async def zapier_webhook(
     """Main webhook endpoint for Zapier integration"""
     try:
         call_id = payload.call_id
-        logger.info(f"Received webhook for call {call_id}")
+        logger.info(f"📞 Received webhook for call {call_id}")
+        logger.info(f"   From: {payload.from_number}")
+        logger.info(f"   To: {payload.to_number}")
         
         if db_manager.is_call_processed(call_id):
             logger.info(f"Duplicate call detected: {call_id}")
@@ -812,7 +938,7 @@ async def zapier_webhook(
         
         background_tasks.add_task(process_call_background, call_data)
         
-        logger.info(f"Queued processing for call {call_id}")
+        logger.info(f"✅ Queued processing for call {call_id}")
         
         return WebhookResponse(
             success=True,
@@ -834,6 +960,7 @@ async def get_stats():
     stats = db_manager.get_stats()
     return {
         "stats": stats,
+        "agents_loaded": len(AGENT_MAPPING),
         "timestamp": datetime.utcnow().isoformat() + "Z"
     }
 
@@ -884,14 +1011,17 @@ async def general_exception_handler(request: Request, exc: Exception):
 async def startup_event():
     """Initialize on startup"""
     logger.info("=" * 60)
-    logger.info("Starting Exotel-Slack Complete System")
+    logger.info("Starting Exotel-Slack Complete System v2.0")
     logger.info("=" * 60)
     logger.info(f"Database: {DATABASE_PATH}")
+    logger.info(f"Agent Database: {len(AGENT_MAPPING)} agents loaded")
     logger.info(f"Transcription: {'Enabled (OpenAI Whisper)' if transcription_service else 'Disabled'}")
     logger.info(f"MOM Generator: {'Enabled' if mom_generator else 'Disabled'}")
     logger.info(f"Slack: {'Enabled' if SLACK_WEBHOOK_URL else 'Disabled'}")
+    logger.info(f"Slack User Lookup: {'Enabled' if slack_user_lookup else 'Disabled (set SLACK_BOT_TOKEN)'}")
     logger.info(f"Support Number: {SUPPORT_NUMBER}")
     logger.info(f"Rate Limiting: {PROCESSING_DELAY}s delay, {MAX_CONCURRENT_CALLS} concurrent calls")
+    logger.info(f"Smart Agent Detection: Enabled ✅")
     logger.info("=" * 60)
     
     Path("downloads").mkdir(exist_ok=True)
