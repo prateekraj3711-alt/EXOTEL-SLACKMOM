@@ -8,6 +8,7 @@ import json
 import logging
 import hashlib
 import asyncio
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -150,6 +151,28 @@ class DatabaseManager:
                 (call_id,)
             ).fetchone()
             return result is not None
+    
+    def mark_call_processing(self, call_id: str, call_data: Dict[str, Any]):
+        """Mark call as being processed (prevents race condition)"""
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT OR IGNORE INTO processed_calls 
+                (call_id, from_number, to_number, duration, timestamp, processed_at, 
+                 transcription_text, slack_posted, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                call_id,
+                call_data['from_number'],
+                call_data['to_number'],
+                call_data['duration'],
+                call_data.get('timestamp', datetime.utcnow().isoformat()),
+                datetime.utcnow().isoformat(),
+                'Processing...',
+                False,
+                'processing'
+            ))
+            conn.commit()
+        logger.info(f"Marked call {call_id} as processing (locked)")
     
     def mark_call_processed(self, call_data: Dict[str, Any], transcription: str, success: bool):
         """Mark call as processed"""
@@ -297,11 +320,21 @@ class MOMGenerator:
         }
     
     def generate_mom(self, transcription: str) -> str:
-        """Generate structured Meeting Minutes from transcription"""
-        try:
-            logger.info("Generating MOM from transcription...")
-            
-            prompt = f"""You are an expert at creating concise Meeting Minutes (MOM) for customer support calls.
+        """Generate structured Meeting Minutes from transcription with retry logic"""
+        max_retries = 3
+        base_delay = 2  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    # Exponential backoff: 2s, 4s, 8s
+                    delay = base_delay * (2 ** attempt)
+                    logger.info(f"Retry attempt {attempt + 1}/{max_retries} after {delay}s delay...")
+                    time.sleep(delay)
+                
+                logger.info(f"Generating MOM from transcription (attempt {attempt + 1}/{max_retries})...")
+                
+                prompt = f"""You are an expert at creating concise Meeting Minutes (MOM) for customer support calls.
 
 Analyze this call transcription and create a structured MOM with these sections:
 
@@ -328,44 +361,80 @@ Transcription:
 
 Create the MOM in a clear, professional format with sufficient detail."""
 
-            payload = {
-                "model": "gpt-3.5-turbo",
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "You are a professional customer support analyst who creates detailed, well-structured meeting minutes with sufficient context."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                "temperature": 0.3,
-                "max_tokens": 800
-            }
-            
-            response = requests.post(
-                self.api_url,
-                headers=self.headers,
-                json=payload,
-                timeout=30
-            )
-            
-            response.raise_for_status()
-            result = response.json()
-            
-            if 'choices' in result and len(result['choices']) > 0:
-                mom = result['choices'][0]['message']['content'].strip()
-                logger.info(f"MOM generated: {len(mom)} characters")
-                return mom
-            
-            raise Exception("No MOM generated from OpenAI")
-            
-        except Exception as e:
-            logger.error(f"MOM generation error: {e}")
-            # Fallback to transcription if MOM generation fails
-            logger.warning("Falling back to original transcription")
-            return f"**Call Summary:**\n{transcription[:500]}..."
+                payload = {
+                    "model": "gpt-3.5-turbo",
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": "You are a professional customer support analyst who creates detailed, well-structured meeting minutes with sufficient context."
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": 800
+                }
+                
+                response = requests.post(
+                    self.api_url,
+                    headers=self.headers,
+                    json=payload,
+                    timeout=30
+                )
+                
+                response.raise_for_status()
+                result = response.json()
+                
+                if 'choices' in result and len(result['choices']) > 0:
+                    mom = result['choices'][0]['message']['content'].strip()
+                    logger.info(f"✅ MOM generated successfully: {len(mom)} characters")
+                    return mom
+                
+                raise Exception("No MOM generated from OpenAI")
+                
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code == 429:
+                    # Rate limit error
+                    logger.warning(f"⚠️ OpenAI rate limit hit (429) - attempt {attempt + 1}/{max_retries}")
+                    if attempt < max_retries - 1:
+                        continue  # Retry with backoff
+                    else:
+                        logger.error("❌ Max retries reached for OpenAI rate limit")
+                elif e.response.status_code == 401:
+                    logger.error("❌ OpenAI API authentication failed - check API key")
+                    break  # Don't retry auth errors
+                else:
+                    logger.error(f"❌ OpenAI API HTTP error: {e.response.status_code}")
+                    if attempt < max_retries - 1:
+                        continue
+                    break
+            except Exception as e:
+                logger.error(f"❌ MOM generation error: {e}")
+                if attempt < max_retries - 1:
+                    continue
+                break
+        
+        # All retries failed - use enhanced fallback
+        logger.error("OpenAI API unavailable after all retries. Using structured fallback.")
+        logger.warning("Falling back to structured transcription with 3+ lines")
+        
+        # Create a structured fallback with minimum 3 lines
+        fallback_mom = f"""**Call Summary:**
+The call was regarding a customer support inquiry. The conversation lasted {len(transcription)} characters.
+
+**Transcription:**
+{transcription[:400] if len(transcription) > 400 else transcription}
+
+**Note:** Automated MOM generation temporarily unavailable (OpenAI rate limit). This is a direct transcription of the call.
+
+**Action Required:**
+• Review call transcription for customer concerns
+• Follow up with customer if needed
+• Update ticket with call details"""
+        
+        return fallback_mom
 
 
 # Slack User Lookup Service
@@ -508,26 +577,7 @@ class SlackFormatter:
     
     @staticmethod
     def format_message(call_data: Dict[str, Any], transcription: str) -> str:
-        """
-        Format Slack message in exact format from the image
-        
-        Format:
-        📞 Support Number: ...
-        📱 Candidate/Customer Number: ...
-        👤 CS Agent: @handle
-        🏢 Department: ...
-        ⏰ Timestamp: ...
-        
-        📋 Call Metadata:
-        • Call ID: ...
-        • Duration: ...
-        • Status: ...
-        • Agent: ...
-        • Customer Segment: ...
-        
-        📝 Meeting Minutes (MOM):
-        [AI-generated MOM with minimum 3 lines]
-        """
+        """Format Slack message in exact format from the image"""
         
         # Determine call direction
         direction = SlackFormatter.determine_direction(
@@ -789,12 +839,15 @@ async def zapier_webhook(
             'recording_url': payload.recording_url,
             'timestamp': payload.timestamp or datetime.utcnow().isoformat(),
             'status': payload.status,
-            'agent_phone': payload.agent_phone,  # NEW: Phone-based tracking
+            'agent_phone': payload.agent_phone,
             'agent_name': payload.agent_name,
             'agent_slack_handle': payload.agent_slack_handle,
             'department': payload.department,
             'customer_segment': payload.customer_segment
         }
+        
+        # CRITICAL: Mark as processing IMMEDIATELY to prevent race condition
+        db_manager.mark_call_processing(call_id, call_data)
         
         # Queue background processing
         background_tasks.add_task(process_call_background, call_data)
