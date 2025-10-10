@@ -1,29 +1,588 @@
 {
-  "_comment": "Agent mapping configuration - Maps phone numbers to agent details",
-  "_instructions": "Add your agents here with their phone numbers as keys",
+  "_comment": "97 Support Agents - Agent mapping by phone number for smart detection",
+  "_instructions": "Phone numbers are normalized (digits only). Email used for Slack tagging. System checks BOTH from_number and to_number against this database.",
   
-  "09631084471": {
-    "name": "Prateek Raj",
-    "slack_handle": "@prateek.raj",
-    "email": "prateek.raj@company.com",
-    "department": "Customer Success",
-    "team": "Support Team A"
+  "7348445574": {
+    "name": "Abhinav",
+    "email": "abhinav.saxena@springworks.in",
+    "department": "ENGG",
+    "team": "Support"
   },
-  
-  "+919876543210": {
-    "name": "Agent Name",
-    "slack_handle": "@agent.name",
-    "email": "agent@company.com",
-    "department": "Customer Success",
-    "team": "Support Team B"
+  "9632834013": {
+    "name": "Kartik M",
+    "email": "kartik@springworks.in",
+    "department": "ADMIN",
+    "team": "Support"
   },
-  
-  "_example_add_more": {
-    "name": "Another Agent",
-    "slack_handle": "@another",
-    "email": "another@company.com",
-    "department": "Sales",
-    "team": "Sales Team"
+  "9900226667": {
+    "name": "Anoop Suresh",
+    "email": "anoop.suresh@springrole.com",
+    "department": "ADMIN",
+    "team": "Support"
+  },
+  "8553518363": {
+    "name": "Siva",
+    "email": "sivananda.reddy@springrole.com",
+    "department": "FINANCE",
+    "team": "Support"
+  },
+  "8050884409": {
+    "name": "Sukrutha",
+    "email": "sukrutha.cr@springworks.in",
+    "department": "OPS",
+    "team": "Support"
+  },
+  "9019906001": {
+    "name": "Selva Thangavel",
+    "email": "selvendiran.t@springrole.com",
+    "department": "OPS",
+    "team": "Support"
+  },
+  "8317311997": {
+    "name": "Sefali Lohani",
+    "email": "sefali.lohani@springrole.com",
+    "department": "OPS",
+    "team": "Support"
+  },
+  "9019906002": {
+    "name": "Shalini Ganesh",
+    "email": "shalini.ganesh@springrole.com",
+    "department": "OPS",
+    "team": "Support"
+  },
+  "9036234464": {
+    "name": "Thanveer Ahamed",
+    "email": "thanveer.p@springverify.com",
+    "department": "OPS",
+    "team": "Support"
+  },
+  "8117877065": {
+    "name": "Aryan Sahu",
+    "email": "aryan.sahu@springverify.in",
+    "department": "SUPPORT CAND",
+    "team": "Support"
+  },
+  "8977951642": {
+    "name": "Umme Farda",
+    "email": "farda.narayanpete@springverify.in",
+    "department": "EMU",
+    "team": "Support"
+  },
+  "7302977850": {
+    "name": "Muskan Garg",
+    "email": "muskan.garg@springverify.in",
+    "department": "EMP",
+    "team": "Support"
+  },
+  "8089991781": {
+    "name": "Khushi Jain",
+    "email": "khushi.jain@springverify.in",
+    "department": "SUPPORT CAND",
+    "team": "Support"
+  },
+  "7799309499": {
+    "name": "Divya Karlapudi",
+    "email": "divya.karlapudi@springverify.in",
+    "department": "SUPPORT",
+    "team": "Support"
+  },
+  "7991925889": {
+    "name": "Shivam Kumar Jha",
+    "email": "shivam.jha@springworks.in",
+    "department": "MISC",
+    "team": "Support"
+  },
+  "9393636699": {
+    "name": "Tejaswini Gondhi",
+    "email": "tejaswini.gondi@springworks.in",
+    "department": "MISC",
+    "team": "Support"
+  },
+  "9796377472": {
+    "name": "Sahar Wali",
+    "email": "saharwali686@gmail.com",
+    "department": "SalesUP",
+    "team": "Support"
+  },
+  "9311633945": {
+    "name": "Vaibhav Agarwal",
+    "email": "vaibhav.agarwal@springverify.in",
+    "department": "SUPPORT",
+    "team": "Support"
+  },
+  "8860668538": {
+    "name": "Shambhavee Sharma",
+    "email": "shambhavee.sharma@springworks.in",
+    "department": "TSOW",
+    "team": "Support"
+  },
+  "9905355916": {
+    "name": "Ananya Ranjan",
+    "email": "ananya.ranjan@springverify.in",
+    "department": "SUPPORT CAND",
+    "team": "Support"
+  },
+  "9819778813": {
+    "name": "Neha K",
+    "email": "neha.kulkarni@springworks.in",
+    "department": "TSOW",
+    "team": "Support"
+  },
+  "9034245177": {
+    "name": "Aman Rohilla",
+    "email": "aman.rohilla@springworks.in",
+    "department": "EDU",
+    "team": "Support"
+  },
+  "8918062860": {
+    "name": "Supriya Chettri",
+    "email": "supriya.chettri@springverify.in",
+    "department": "SUPPORT",
+    "team": "Support"
+  },
+  "9494223265": {
+    "name": "Sakshi Kamani",
+    "email": "sakshi.kamani@springverify.in",
+    "department": "EMP",
+    "team": "Support"
+  },
+  "7569954922": {
+    "name": "Mohan",
+    "email": "sai.ranga@springverify.in",
+    "department": "SUPPORT",
+    "team": "Support"
+  },
+  "9901294304": {
+    "name": "Sadia V",
+    "email": "sadia.vali@springworks.in",
+    "department": "TSOW",
+    "team": "Support"
+  },
+  "9158893318": {
+    "name": "Al Hasan",
+    "email": "al.hasan@springworks.in",
+    "department": "EMP",
+    "team": "Support"
+  },
+  "9320104077": {
+    "name": "Sadiyah Ansari",
+    "email": "sadiya.ansari@springverify.in",
+    "department": "SUPPORT CAND",
+    "team": "Support"
+  },
+  "8240282418": {
+    "name": "Dhristi Shah",
+    "email": "dhristi.shah@springverify.in",
+    "department": "TSOW",
+    "team": "Support"
+  },
+  "7024462590": {
+    "name": "Sidak Singh",
+    "email": "sidak.singh@springworks.in",
+    "department": "MISC",
+    "team": "Support"
+  },
+  "7020556801": {
+    "name": "Aishwarya Bhallerao",
+    "email": "aishwarya.bhallerao@springverify.in",
+    "department": "EDU",
+    "team": "Support"
+  },
+  "6362361746": {
+    "name": "Sidra Firdouse",
+    "email": "sidra.firdouse@springworks.in",
+    "department": "EMP RES",
+    "team": "Support"
+  },
+  "9167956906": {
+    "name": "Mayuresh Warang",
+    "email": "mayuresh.warang@springverify.in",
+    "department": "EMP RES",
+    "team": "Support"
+  },
+  "8418842620": {
+    "name": "Nazia Hasan",
+    "email": "nazia.hasan@springworks.in",
+    "department": "REF",
+    "team": "Support"
+  },
+  "7038403725": {
+    "name": "Khushbu Meshram",
+    "email": "khushbu.meshram@springworks.in",
+    "department": "REF",
+    "team": "Support"
+  },
+  "7676749731": {
+    "name": "Navaneetha KS",
+    "email": "navaneetha.k@springworks.in",
+    "department": "EDU",
+    "team": "Support"
+  },
+  "7889650295": {
+    "name": "Muzamil",
+    "email": "muzamilshafi0hat@gmail.com",
+    "department": "SalesUP",
+    "team": "Support"
+  },
+  "9123041513": {
+    "name": "Dolly Agarwal",
+    "email": "dolly.agarwal@springworks.in",
+    "department": "MISC",
+    "team": "Support"
+  },
+  "9852338574": {
+    "name": "Md Armaan",
+    "email": "md.armaan@springworks.in",
+    "department": "SUPPORT",
+    "team": "Support"
+  },
+  "9687776769": {
+    "name": "Avnee",
+    "email": "avnee@springverify.in",
+    "department": "REF",
+    "team": "Support"
+  },
+  "9960431880": {
+    "name": "Abdul Hanan",
+    "email": "abdulhmalik96@gmail.com",
+    "department": "SalesUP",
+    "team": "Support"
+  },
+  "9014794782": {
+    "name": "Ramya Sudha",
+    "email": "ramya.sudha@springworks.in",
+    "department": "ADD",
+    "team": "Support"
+  },
+  "9600167042": {
+    "name": "Chitra Sridhar",
+    "email": "chitra.s@springworks.in",
+    "department": "EDU",
+    "team": "Support"
+  },
+  "9864524862": {
+    "name": "Sakshi Bhuyan",
+    "email": "sakshi.bhuyan@springworks.in",
+    "department": "REF",
+    "team": "Support"
+  },
+  "8340276529": {
+    "name": "Shivam Bhardwaj",
+    "email": "shivam.bhardwaj@springworks.in",
+    "department": "EMP",
+    "team": "Support"
+  },
+  "7708017405": {
+    "name": "Dharshini Andal",
+    "email": "dharshini.andal@springworks.in",
+    "department": "SALES AE",
+    "team": "Support"
+  },
+  "7338110031": {
+    "name": "Arinjay Hiremath",
+    "email": "arinjay.hiremath@springworks.in",
+    "department": "SALES AE",
+    "team": "Support"
+  },
+  "8168470031": {
+    "name": "Lovish Tayal",
+    "email": "lovish.tayal@springverify.in",
+    "department": "EMP RES",
+    "team": "Support"
+  },
+  "9693175704": {
+    "name": "Ragul A S",
+    "email": "ragul.as@springworks.in",
+    "department": "SUPPORT",
+    "team": "Support"
+  },
+  "8317657138": {
+    "name": "Salman Baig",
+    "email": "salman.mirza@springverify.in",
+    "department": "EMP RES",
+    "team": "Support"
+  },
+  "8862975000": {
+    "name": "Jini Priya",
+    "email": "jini.priya@springworks.in",
+    "department": "EMP",
+    "team": "Support"
+  },
+  "8528266236": {
+    "name": "Ruchi Mishra",
+    "email": "ruchi.mishra@springverify.in",
+    "department": "SUPPORT",
+    "team": "Support"
+  },
+  "8310009146": {
+    "name": "Ravindra Shivakumar",
+    "email": "ravindra.s@springworks.in",
+    "department": "EMP",
+    "team": "Support"
+  },
+  "9583510227": {
+    "name": "Mahima Khandelwal",
+    "email": "mahima.khandelwal@springworks.in",
+    "department": "SUPPORT CAND",
+    "team": "Support"
+  },
+  "9902353404": {
+    "name": "Mrinalini Krishnan",
+    "email": "mrinalini.krishnan@springworks.in",
+    "department": "SUPPORT",
+    "team": "Support"
+  },
+  "7304112657": {
+    "name": "Arbina Imran",
+    "email": "arbina.penkar@springworks.in",
+    "department": "SUPPORT",
+    "team": "Support"
+  },
+  "7518286988": {
+    "name": "Pratyaksh",
+    "email": "pratyaksh.tripathi@springworks.in",
+    "department": "ADMIN",
+    "team": "Support"
+  },
+  "9560877745": {
+    "name": "Soumabrata",
+    "email": "soumabrata.chatterjee@springworks.in",
+    "department": "ADMIN CS",
+    "team": "Support"
+  },
+  "9149724421": {
+    "name": "Abhishek Singh",
+    "email": "abhishek.singh@springverify.in",
+    "department": "ADD",
+    "team": "Support"
+  },
+  "7679767713": {
+    "name": "Aditi Mukhopadhyay",
+    "email": "aditi.mukhopadhyay@springverify.in",
+    "department": "ADD",
+    "team": "Support"
+  },
+  "8971387881": {
+    "name": "Shamshad",
+    "email": "shamshad.jamawar@springverify.in",
+    "department": "SUPPORT CAND",
+    "team": "Support"
+  },
+  "9821712364": {
+    "name": "Shagufta Khan",
+    "email": "shagufta.khan@springworks.in",
+    "department": "EMP",
+    "team": "Support"
+  },
+  "8334878337": {
+    "name": "Sampurnaa Saha",
+    "email": "sampurnaa.saha@springverify.in",
+    "department": "ADD",
+    "team": "Support"
+  },
+  "7780863673": {
+    "name": "Mahima Gupta",
+    "email": "mahima.gupta@springworks.in",
+    "department": "EMP",
+    "team": "Support"
+  },
+  "8822191923": {
+    "name": "Debopriya Singh",
+    "email": "debopriya.singh@springverify.in",
+    "department": "SUPPORT CAND",
+    "team": "Support"
+  },
+  "7987472807": {
+    "name": "Neelam Tiwari",
+    "email": "neelam.tiwari@springverify.in",
+    "department": "SUPPORT",
+    "team": "Support"
+  },
+  "7012375329": {
+    "name": "Ajay Raj",
+    "email": "ajay.raj@springverify.in",
+    "department": "SUPPORT CAND",
+    "team": "Support"
+  },
+  "9330818130": {
+    "name": "Susmita Deb",
+    "email": "susmita.deb@springverify.in",
+    "department": "SUPPORT",
+    "team": "Support"
+  },
+  "9468557441": {
+    "name": "Kartik Chabbra",
+    "email": "kartikchhabra363@gmail.com",
+    "department": "SalesUP",
+    "team": "Support"
+  },
+  "9676275577": {
+    "name": "Joyley",
+    "email": "joyley.chadalavada@springverify.in",
+    "department": "SUPPORT CAND",
+    "team": "Support"
+  },
+  "8968307089": {
+    "name": "Ekta Pandey",
+    "email": "ekta.pandey@springverify.in",
+    "department": "SUPPORT CAND",
+    "team": "Support"
+  },
+  "8395321693": {
+    "name": "Satya Aneja",
+    "email": "satya.aneja@springverify.in",
+    "department": "SUPPORT CAND",
+    "team": "Support"
+  },
+  "6291113907": {
+    "name": "Trisha Samaddar",
+    "email": "trisha.samaddar@springverify.in",
+    "department": "ADD",
+    "team": "Support"
+  },
+  "8420823021": {
+    "name": "Sristy Jaydhar",
+    "email": "sristy.jaydhar@springworks.in",
+    "department": "EMP",
+    "team": "Support"
+  },
+  "8979944650": {
+    "name": "Utsav Raj",
+    "email": "utsav.raj@springworks.in",
+    "department": "EMP",
+    "team": "Support"
+  },
+  "9994924178": {
+    "name": "Deepika Senthilkumar",
+    "email": "deepika.s@springworks.in",
+    "department": "ADD",
+    "team": "Support"
+  },
+  "6906668707": {
+    "name": "Shivanand",
+    "email": "saha.shiv.73@gmail.com",
+    "department": "SalesUP",
+    "team": "Support"
+  },
+  "8126033006": {
+    "name": "Syed Wali",
+    "email": "syed.wali@springworks.in",
+    "department": "SUPPORT",
+    "team": "Support"
+  },
+  "6005565997": {
+    "name": "Diksha Shah",
+    "email": "diksha.shah@springworks.in",
+    "department": "SUPPORT CAND",
+    "team": "Support"
+  },
+  "9974439156": {
+    "name": "Uttkarsh Tripathi",
+    "email": "uttkarsh.tripathi@springverify.in",
+    "department": "SUPPORT",
+    "team": "Support"
+  },
+  "8445440260": {
+    "name": "Preet Seerna",
+    "email": "preet.seerna@springverify.in",
+    "department": "SUPPORT CAND",
+    "team": "Support"
+  },
+  "9996788409": {
+    "name": "Alisha",
+    "email": "alisha@springverify.in",
+    "department": "SUPPORT CAND",
+    "team": "Support"
+  },
+  "6396894655": {
+    "name": "Aditya Trivedy",
+    "email": "aditya.trivedy@springverify.in",
+    "department": "ADD",
+    "team": "Support"
+  },
+  "9560373935": {
+    "name": "Priya Chakraborty",
+    "email": "priya7866chakraborty@gmail.com",
+    "department": "SalesUP",
+    "team": "Support"
+  },
+  "8219834257": {
+    "name": "Arsh Ahmed Chauhan",
+    "email": "arsh.chauhan@springverify.in",
+    "department": "SUPPORT",
+    "team": "Support"
+  },
+  "8002762311": {
+    "name": "Nayan Shandil",
+    "email": "nayan.shandil@springverify.in",
+    "department": "ADD",
+    "team": "Support"
+  },
+  "9996874749": {
+    "name": "Abhi Batra",
+    "email": "abhi.batra@springverify.in",
+    "department": "SUPPORT CAND",
+    "team": "Support"
+  },
+  "7876224276": {
+    "name": "Kartik Kaushal",
+    "email": "kartik.kaushal@springverify.in",
+    "department": "ADD",
+    "team": "Support"
+  },
+  "9653650021": {
+    "name": "Lavanya Dani",
+    "email": "lavanya.dani@springworks.in",
+    "department": "ADD",
+    "team": "Support"
+  },
+  "8494070230": {
+    "name": "Basit Shafi",
+    "email": "basitshafi123123@gmail.com",
+    "department": "SalesUP",
+    "team": "Support"
+  },
+  "8087588149": {
+    "name": "Manish Andhe",
+    "email": "manish.andhe@springworks.in",
+    "department": "MISC",
+    "team": "Support"
+  },
+  "9818417244": {
+    "name": "Tarun Kumar",
+    "email": "tarun.kumar@springworks.in",
+    "department": "DEV",
+    "team": "Support"
+  },
+  "9784725248": {
+    "name": "Piyush",
+    "email": "piyush.bhojwani@springworks.in",
+    "department": "ENGG",
+    "team": "Support"
+  },
+  "9463240230": {
+    "name": "Manav",
+    "email": "manav.jhaveri@springworks.in",
+    "department": "ENGG",
+    "team": "Support"
+  },
+  "8445741665": {
+    "name": "Mritunjay",
+    "email": "mritunjay.agarwal@springworks.in",
+    "department": "DEV",
+    "team": "Support"
+  },
+  "8174942046": {
+    "name": "Jillella Akshaya Prajwala",
+    "email": "jillellaakshayaprajwala.8@gmail.com",
+    "department": "ENGG",
+    "team": "Support"
+  },
+  "9014127370": {
+    "name": "Bhanuja",
+    "email": "bhanuja@salesup.club",
+    "department": "SalesUP",
+    "team": "Support"
   }
 }
 
