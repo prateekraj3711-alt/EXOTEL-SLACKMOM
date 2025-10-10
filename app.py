@@ -37,9 +37,8 @@ app = FastAPI(
 
 # Configuration from environment
 SLACK_WEBHOOK_URL = os.environ.get('SLACK_WEBHOOK_URL')
-SLACK_BOT_TOKEN = os.environ.get('SLACK_BOT_TOKEN')  # For querying Slack users
-DEEPGRAM_API_KEY = os.environ.get('DEEPGRAM_API_KEY')  # Deepgram for transcription
-OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')  # OpenAI for MOM generation
+SLACK_BOT_TOKEN = os.environ.get('SLACK_BOT_TOKEN')
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')  # Used for both transcription AND MOM
 EXOTEL_API_KEY = os.environ.get('EXOTEL_API_KEY')
 EXOTEL_API_TOKEN = os.environ.get('EXOTEL_API_TOKEN')
 EXOTEL_SID = os.environ.get('EXOTEL_SID')
@@ -49,8 +48,8 @@ DATABASE_PATH = os.environ.get('DATABASE_PATH', 'processed_calls.db')
 SUPPORT_NUMBER = os.environ.get('SUPPORT_NUMBER', '09631084471')
 
 # Rate limiting configuration
-PROCESSING_DELAY = int(os.environ.get('PROCESSING_DELAY', '5'))  # seconds between calls
-MAX_CONCURRENT_CALLS = int(os.environ.get('MAX_CONCURRENT_CALLS', '3'))  # parallel processing limit
+PROCESSING_DELAY = int(os.environ.get('PROCESSING_DELAY', '5'))
+MAX_CONCURRENT_CALLS = int(os.environ.get('MAX_CONCURRENT_CALLS', '3'))
 
 # Processing queue and semaphore
 processing_semaphore = asyncio.Semaphore(MAX_CONCURRENT_CALLS)
@@ -66,7 +65,6 @@ def load_agent_mapping():
         if agent_file.exists():
             with open(agent_file, 'r') as f:
                 data = json.load(f)
-                # Filter out comment keys
                 AGENT_MAPPING = {k: v for k, v in data.items() if not k.startswith('_')}
             logger.info(f"Loaded {len(AGENT_MAPPING)} agent mappings")
         else:
@@ -74,7 +72,6 @@ def load_agent_mapping():
     except Exception as e:
         logger.error(f"Failed to load agent mapping: {e}")
 
-# Load agent mapping on startup
 load_agent_mapping()
 
 # Pydantic Models
@@ -218,28 +215,25 @@ class DatabaseManager:
 db_manager = DatabaseManager(DATABASE_PATH)
 
 
-# Transcription Service
+# Transcription Service using OpenAI Whisper
 class TranscriptionService:
-    """Handle audio transcription using Deepgram"""
+    """Handle audio transcription using OpenAI Whisper"""
     
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.api_url = "https://api.deepgram.com/v1/listen"
+        self.api_url = "https://api.openai.com/v1/audio/transcriptions"
         self.headers = {
-            "Authorization": f"Token {self.api_key}",
-            "Content-Type": "audio/mpeg"
+            "Authorization": f"Bearer {self.api_key}"
         }
     
     def download_recording(self, recording_url: str, call_id: str) -> str:
         """Download recording from Exotel"""
         try:
-            # Create downloads directory
             downloads_dir = Path("downloads")
             downloads_dir.mkdir(exist_ok=True)
             
             file_path = downloads_dir / f"{call_id}.mp3"
             
-            # Download with authentication
             auth = (EXOTEL_API_KEY, EXOTEL_API_TOKEN) if EXOTEL_API_KEY else None
             
             response = requests.get(recording_url, auth=auth, timeout=60)
@@ -256,49 +250,43 @@ class TranscriptionService:
             raise
     
     def transcribe_audio(self, audio_file_path: str) -> str:
-        """Transcribe audio file using Deepgram (Basic/Free Tier)"""
+        """Transcribe audio file using OpenAI Whisper"""
         try:
-            logger.info("Transcribing audio with Deepgram (basic model)...")
+            logger.info("Transcribing audio with OpenAI Whisper...")
             
-            # Use basic Deepgram parameters compatible with free tier
-            params = {
-                "punctuate": "true",
-                "language": "en"
-            }
-            # Removed: model, smart_format, diarize, tier - use defaults for free tier
-            
-            # Send audio file directly
             with open(audio_file_path, 'rb') as audio_file:
+                files = {
+                    'file': (os.path.basename(audio_file_path), audio_file, 'audio/mpeg')
+                }
+                data = {
+                    'model': 'whisper-1',
+                    'language': 'en',
+                    'response_format': 'json'
+                }
+                
                 response = requests.post(
                     self.api_url,
                     headers=self.headers,
-                    params=params,
-                    data=audio_file,
+                    files=files,
+                    data=data,
                     timeout=120
                 )
             
             response.raise_for_status()
             result = response.json()
             
-            # Extract transcription
-            if 'results' in result and 'channels' in result['results']:
-                channel = result['results']['channels'][0]
-                
-                if 'alternatives' in channel and len(channel['alternatives']) > 0:
-                    alternative = channel['alternatives'][0]
-                    transcription = alternative.get('transcript', '')
-                    
-                    if transcription:
-                        logger.info(f"Transcription completed: {len(transcription)} characters")
-                        return transcription
+            transcription = result.get('text', '')
             
-            raise Exception("No transcription results from Deepgram")
+            if transcription:
+                logger.info(f"✅ Transcription completed: {len(transcription)} characters")
+                return transcription
+            
+            raise Exception("No transcription text returned from OpenAI Whisper")
             
         except Exception as e:
-            logger.error(f"Deepgram transcription error: {e}")
+            logger.error(f"❌ OpenAI Whisper transcription error: {e}")
             raise
         finally:
-            # Cleanup downloaded file
             try:
                 if os.path.exists(audio_file_path):
                     os.remove(audio_file_path)
@@ -322,12 +310,11 @@ class MOMGenerator:
     def generate_mom(self, transcription: str) -> str:
         """Generate structured Meeting Minutes from transcription with retry logic"""
         max_retries = 3
-        base_delay = 2  # seconds
+        base_delay = 2
         
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
-                    # Exponential backoff: 2s, 4s, 8s
                     delay = base_delay * (2 ** attempt)
                     logger.info(f"Retry attempt {attempt + 1}/{max_retries} after {delay}s delay...")
                     time.sleep(delay)
@@ -396,15 +383,14 @@ Create the MOM in a clear, professional format with sufficient detail."""
                 
             except requests.exceptions.HTTPError as e:
                 if e.response.status_code == 429:
-                    # Rate limit error
                     logger.warning(f"⚠️ OpenAI rate limit hit (429) - attempt {attempt + 1}/{max_retries}")
                     if attempt < max_retries - 1:
-                        continue  # Retry with backoff
+                        continue
                     else:
                         logger.error("❌ Max retries reached for OpenAI rate limit")
                 elif e.response.status_code == 401:
                     logger.error("❌ OpenAI API authentication failed - check API key")
-                    break  # Don't retry auth errors
+                    break
                 else:
                     logger.error(f"❌ OpenAI API HTTP error: {e.response.status_code}")
                     if attempt < max_retries - 1:
@@ -416,11 +402,9 @@ Create the MOM in a clear, professional format with sufficient detail."""
                     continue
                 break
         
-        # All retries failed - use enhanced fallback
         logger.error("OpenAI API unavailable after all retries. Using structured fallback.")
         logger.warning("Falling back to structured transcription with 3+ lines")
         
-        # Create a structured fallback with minimum 3 lines
         fallback_mom = f"""**Call Summary:**
 The call was regarding a customer support inquiry. The conversation lasted {len(transcription)} characters.
 
@@ -443,14 +427,12 @@ class SlackUserLookup:
     
     def __init__(self, bot_token: Optional[str]):
         self.bot_token = bot_token
-        self.users_cache = {}  # Cache to avoid repeated API calls
+        self.users_cache = {}
         self.cache_loaded = False
     
     def normalize_phone(self, phone: str) -> str:
         """Normalize phone number for comparison"""
-        # Remove all non-digit characters
         normalized = ''.join(filter(str.isdigit, phone))
-        # Remove country code if present (assuming India +91)
         if normalized.startswith('91') and len(normalized) == 12:
             normalized = normalized[2:]
         return normalized
@@ -477,7 +459,6 @@ class SlackUserLookup:
                 logger.error(f"Slack API error: {data.get('error')}")
                 return False
             
-            # Cache users by phone number
             for member in data.get('members', []):
                 if member.get('deleted') or member.get('is_bot'):
                     continue
@@ -512,13 +493,12 @@ class SlackUserLookup:
         return self.users_cache.get(normalized)
 
 
-# Initialize Slack user lookup
 slack_user_lookup = SlackUserLookup(SLACK_BOT_TOKEN) if SLACK_BOT_TOKEN else None
 
 
 # Slack Formatter
 class SlackFormatter:
-    """Format call data for Slack posting in exact format from image"""
+    """Format call data for Slack posting"""
     
     @staticmethod
     def normalize_phone(phone: str) -> str:
@@ -530,7 +510,6 @@ class SlackFormatter:
         """Get agent information from phone number"""
         normalized = SlackFormatter.normalize_phone(phone_number)
         
-        # First, try to look up in Slack workspace (if enabled)
         if slack_user_lookup:
             slack_user = slack_user_lookup.get_user_by_phone(phone_number)
             if slack_user:
@@ -543,12 +522,10 @@ class SlackFormatter:
                     "email": slack_user.get('email', '')
                 }
         
-        # Fallback: Check agent mapping JSON file
         for mapped_phone, agent_data in AGENT_MAPPING.items():
             if SlackFormatter.normalize_phone(mapped_phone) == normalized:
                 return agent_data
         
-        # Default if not found anywhere
         logger.warning(f"Agent not found for phone: {phone_number}")
         return {
             "name": "Support Agent",
@@ -564,12 +541,10 @@ class SlackFormatter:
         to_clean = SlackFormatter.normalize_phone(to_number)
         support_clean = SlackFormatter.normalize_phone(support_number)
         
-        # Check if from_number matches any agent in mapping
         for mapped_phone in AGENT_MAPPING.keys():
             if SlackFormatter.normalize_phone(mapped_phone) == from_clean:
                 return "outgoing"
         
-        # Fallback to support number check
         if support_clean in from_clean:
             return "outgoing"
         else:
@@ -577,24 +552,21 @@ class SlackFormatter:
     
     @staticmethod
     def format_message(call_data: Dict[str, Any], transcription: str) -> str:
-        """Format Slack message in exact format from the image"""
+        """Format Slack message"""
         
-        # Determine call direction
         direction = SlackFormatter.determine_direction(
             call_data['from_number'],
             call_data['to_number'],
             SUPPORT_NUMBER
         )
         
-        # Set support and customer numbers based on direction
         if direction == "outgoing":
             support_number = call_data['from_number']
             customer_number = call_data['to_number']
-        else:  # incoming
+        else:
             support_number = call_data['to_number']
             customer_number = call_data['from_number']
         
-        # Get agent info from phone number or use provided data
         agent_phone = call_data.get('agent_phone')
         if agent_phone:
             agent_info = SlackFormatter.get_agent_info(agent_phone)
@@ -602,12 +574,10 @@ class SlackFormatter:
             agent_handle = agent_info['slack_handle']
             department = agent_info['department']
         else:
-            # Use provided data or defaults
             agent_name = call_data.get('agent_name', 'Support Agent')
             agent_handle = call_data.get('agent_slack_handle', '@support')
             department = call_data.get('department', 'Customer Success')
         
-        # Ensure agent handle has @
         if agent_handle and not agent_handle.startswith('@'):
             agent_handle = f"@{agent_handle}"
         elif not agent_handle:
@@ -616,20 +586,16 @@ class SlackFormatter:
         # Format timestamp - CONVERT TO IST
         timestamp = call_data.get('timestamp', datetime.utcnow().isoformat())
         if 'T' in timestamp:
-            # Parse ISO format (UTC)
             dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-            # Convert to IST (UTC+5:30)
             ist_offset = timedelta(hours=5, minutes=30)
             dt_ist = dt + ist_offset
             timestamp_formatted = dt_ist.strftime('%Y-%m-%d %H:%M:%S IST')
         else:
             timestamp_formatted = timestamp + ' IST'
         
-        # Format duration
         duration_sec = call_data.get('duration', 0)
         duration_formatted = f"{duration_sec}s"
         
-        # Build message
         message = f"""📞 *Support Number:*
 {support_number}
 
@@ -685,32 +651,28 @@ class SlackFormatter:
 
 
 # Initialize services
-transcription_service = TranscriptionService(DEEPGRAM_API_KEY) if DEEPGRAM_API_KEY else None
+transcription_service = TranscriptionService(OPENAI_API_KEY) if OPENAI_API_KEY else None
 mom_generator = MOMGenerator(OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 
-# Background processing function with rate limiting
+# Background processing
 async def process_call_with_rate_limit(call_data: Dict[str, Any]):
-    """Process call with rate limiting to prevent server overload"""
+    """Process call with rate limiting"""
     call_id = call_data['call_id']
     
-    # Acquire semaphore (wait if max concurrent calls reached)
     async with processing_semaphore:
         try:
             logger.info(f"[Queue] Starting processing for call {call_id}")
             
-            # Check if recording URL is provided
             recording_url = call_data.get('recording_url')
             if not recording_url:
                 logger.warning(f"No recording URL for call {call_id}")
                 db_manager.mark_call_processed(call_data, "No recording available", False)
                 return
             
-            # Download recording (blocking I/O, but that's OK in thread pool)
             logger.info(f"Downloading recording for call {call_id}")
             audio_file = transcription_service.download_recording(recording_url, call_id)
             
-            # Transcribe audio
             logger.info(f"Transcribing call {call_id}")
             transcription = transcription_service.transcribe_audio(audio_file)
             
@@ -719,7 +681,6 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
             
             logger.info(f"Transcription completed: {len(transcription)} characters")
             
-            # Generate MOM from transcription
             if mom_generator:
                 logger.info(f"Generating MOM for call {call_id}")
                 mom = mom_generator.generate_mom(transcription)
@@ -727,14 +688,12 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
                 logger.warning("MOM generator not available, using transcription")
                 mom = transcription
             
-            # Format and post to Slack
             logger.info(f"Formatting message for Slack")
             slack_message = SlackFormatter.format_message(call_data, mom)
             
             logger.info(f"Posting to Slack")
             success = SlackFormatter.post_to_slack(slack_message, SLACK_WEBHOOK_URL)
             
-            # Mark as processed
             db_manager.mark_call_processed(call_data, transcription, success)
             
             if success:
@@ -742,7 +701,6 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
             else:
                 logger.error(f"❌ Failed to post to Slack for call {call_id}")
             
-            # Add delay before next call (rate limiting)
             if PROCESSING_DELAY > 0:
                 logger.info(f"⏸️ Waiting {PROCESSING_DELAY} seconds before next call...")
                 await asyncio.sleep(PROCESSING_DELAY)
@@ -755,7 +713,6 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
 def process_call_background(call_data: Dict[str, Any]):
     """Wrapper to run async processing in background"""
     try:
-        # Create a new event loop for this thread
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -769,7 +726,7 @@ def process_call_background(call_data: Dict[str, Any]):
 # API Endpoints
 @app.get("/")
 async def root():
-    """Root endpoint with service information"""
+    """Root endpoint"""
     return {
         "service": "Exotel-Slack Complete System",
         "version": "1.0.0",
@@ -794,7 +751,7 @@ async def health_check():
         "database": "connected",
         "stats": stats,
         "services": {
-            "transcription": "enabled" if transcription_service else "disabled",
+            "transcription": "enabled (OpenAI Whisper)" if transcription_service else "disabled",
             "mom_generator": "enabled" if mom_generator else "disabled",
             "slack": "enabled" if SLACK_WEBHOOK_URL else "disabled"
         }
@@ -806,17 +763,11 @@ async def zapier_webhook(
     payload: ZapierWebhookPayload,
     background_tasks: BackgroundTasks
 ):
-    """
-    Main webhook endpoint for Zapier integration
-    
-    Receives call data from Zapier, checks for duplicates,
-    and processes in background (transcribe + post to Slack)
-    """
+    """Main webhook endpoint for Zapier integration"""
     try:
         call_id = payload.call_id
         logger.info(f"Received webhook for call {call_id}")
         
-        # Check for duplicate
         if db_manager.is_call_processed(call_id):
             logger.info(f"Duplicate call detected: {call_id}")
             return WebhookResponse(
@@ -826,14 +777,12 @@ async def zapier_webhook(
                 timestamp=datetime.utcnow().isoformat() + "Z"
             )
         
-        # Validate required services
         if not SLACK_WEBHOOK_URL:
             raise HTTPException(status_code=500, detail="Slack webhook not configured")
         
         if not transcription_service:
             raise HTTPException(status_code=500, detail="Transcription service not configured")
         
-        # Prepare call data
         call_data = {
             'call_id': call_id,
             'from_number': payload.from_number,
@@ -849,10 +798,8 @@ async def zapier_webhook(
             'customer_segment': payload.customer_segment
         }
         
-        # CRITICAL: Mark as processing IMMEDIATELY to prevent race condition
         db_manager.mark_call_processing(call_id, call_data)
         
-        # Queue background processing
         background_tasks.add_task(process_call_background, call_data)
         
         logger.info(f"Queued processing for call {call_id}")
@@ -896,7 +843,6 @@ async def get_call_details(call_id: str):
         return dict(result)
 
 
-# Error handlers
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     """Handle HTTP exceptions"""
@@ -924,7 +870,6 @@ async def general_exception_handler(request: Request, exc: Exception):
     )
 
 
-# Startup event
 @app.on_event("startup")
 async def startup_event():
     """Initialize on startup"""
@@ -932,18 +877,16 @@ async def startup_event():
     logger.info("Starting Exotel-Slack Complete System")
     logger.info("=" * 60)
     logger.info(f"Database: {DATABASE_PATH}")
-    logger.info(f"Transcription: {'Enabled' if transcription_service else 'Disabled'}")
+    logger.info(f"Transcription: {'Enabled (OpenAI Whisper)' if transcription_service else 'Disabled'}")
     logger.info(f"MOM Generator: {'Enabled' if mom_generator else 'Disabled'}")
     logger.info(f"Slack: {'Enabled' if SLACK_WEBHOOK_URL else 'Disabled'}")
     logger.info(f"Support Number: {SUPPORT_NUMBER}")
     logger.info(f"Rate Limiting: {PROCESSING_DELAY}s delay, {MAX_CONCURRENT_CALLS} concurrent calls")
     logger.info("=" * 60)
     
-    # Create directories
     Path("downloads").mkdir(exist_ok=True)
 
 
-# Main entry point
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     
