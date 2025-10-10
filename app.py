@@ -9,7 +9,7 @@ import logging
 import hashlib
 import asyncio
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Any
 import requests
@@ -613,14 +613,17 @@ class SlackFormatter:
         elif not agent_handle:
             agent_handle = '@support'
         
-        # Format timestamp
+        # Format timestamp - CONVERT TO IST
         timestamp = call_data.get('timestamp', datetime.utcnow().isoformat())
         if 'T' in timestamp:
-            # Parse ISO format
+            # Parse ISO format (UTC)
             dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-            timestamp_formatted = dt.strftime('%Y-%m-%d %H:%M:%S')
+            # Convert to IST (UTC+5:30)
+            ist_offset = timedelta(hours=5, minutes=30)
+            dt_ist = dt + ist_offset
+            timestamp_formatted = dt_ist.strftime('%Y-%m-%d %H:%M:%S IST')
         else:
-            timestamp_formatted = timestamp
+            timestamp_formatted = timestamp + ' IST'
         
         # Format duration
         duration_sec = call_data.get('duration', 0)
