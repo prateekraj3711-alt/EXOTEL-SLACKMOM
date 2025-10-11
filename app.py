@@ -52,6 +52,10 @@ SUPPORT_NUMBER = os.environ.get('SUPPORT_NUMBER', '09631084471')
 PROCESSING_DELAY = int(os.environ.get('PROCESSING_DELAY', '5'))
 MAX_CONCURRENT_CALLS = int(os.environ.get('MAX_CONCURRENT_CALLS', '3'))
 
+# Department filtering configuration
+ALLOWED_DEPARTMENTS = os.environ.get('ALLOWED_DEPARTMENTS', 'CUSTOMER SUPPORT')
+ALLOWED_DEPT_LIST = [d.strip() for d in ALLOWED_DEPARTMENTS.split(',')] if ALLOWED_DEPARTMENTS.upper() != 'ALL' else []
+
 # Processing semaphore (use threading.Semaphore for cross-thread compatibility)
 processing_semaphore = threading.Semaphore(MAX_CONCURRENT_CALLS)
 
@@ -325,6 +329,12 @@ class MOMGenerator:
 
 Analyze this call transcription and create a structured MOM with these sections:
 
+**Tone:** [REQUIRED - Choose ONE: "Normal" or "Escalation"]
+Determine if the call is an escalation (customer is frustrated/angry/upset/demanding manager) or normal (regular inquiry/polite conversation).
+
+**Issue Type:** [REQUIRED - Choose ONE or MORE from: Case Status Update, Insufficiency, Recharge, Product, Miscellaneous]
+Categorize the main topics discussed. Can be multiple types separated by commas.
+
 **Customer Issue:**
 [Summarize the main problem/concern the customer is reporting - minimum 1 line]
 
@@ -346,6 +356,23 @@ CRITICAL REQUIREMENTS:
 - Include direct quotes or verbatim statements whenever possible
 - Each section should be detailed and informative
 - Include specific details from the transcription
+- MUST include Tone and Issue Type at the beginning
+
+FORMAT:
+**Tone:** [Normal/Escalation]
+**Issue Type:** [One or more categories]
+
+**Customer Issue:**
+[Summary]
+
+**Key Discussion Points:**
+[Actual quotes]
+
+**Action Items:**
+[Actions]
+
+**Resolution Status:**
+[Status]
 
 Transcription:
 {transcription}
@@ -623,8 +650,10 @@ class SlackFormatter:
         return None
     
     @staticmethod
-    def format_message(call_data: Dict[str, Any], transcription: str) -> str:
-        """Format Slack message with smart agent detection and email tagging"""
+    def format_message(call_data: Dict[str, Any], mom: str, transcript: str = "") -> Dict[str, Any]:
+        """Format Slack message with smart agent detection and email tagging
+        Returns dict with 'message', 'customer_number', 'agent_name', 'timestamp'
+        """
         
         # SMART DETECTION: Find which number belongs to support agent
         agent_info = SlackFormatter.find_agent_from_call(
@@ -673,73 +702,82 @@ class SlackFormatter:
             ist_offset = timedelta(hours=5, minutes=30)
             dt_ist = dt + ist_offset
             timestamp_formatted = dt_ist.strftime('%Y-%m-%d %H:%M:%S IST')
+            date_only = dt_ist.strftime('%Y-%m-%d')
         else:
             timestamp_formatted = timestamp + ' IST'
+            date_only = timestamp
         
         duration_sec = call_data.get('duration', 0)
-        duration_formatted = f"{duration_sec}s"
+        duration_formatted = f"{duration_sec}s ({int(duration_sec // 60)}m {duration_sec % 60}s)"
         
-        # Build agent line with email
-        if agent_info:
-            # Agent was found in database
-            if agent_email:
-                agent_line = f"{agent_name} {agent_mention}\n📧 *Email:* {agent_email}"
-            else:
-                agent_line = f"{agent_name} {agent_mention}"
-        else:
-            # Agent NOT found in database
-            agent_line = f"⚠️ *Unknown Agent* {agent_mention}\n💡 *Note:* Phone numbers not found in agent database\n📞 *From:* {call_data['from_number']}\n📞 *To:* {call_data['to_number']}"
+        # Customer Legal Name (use phone number for now, can be enhanced with Google Sheets lookup)
+        customer_legal_name = f"Customer {customer_number}"
         
-        # Direction text - show who called whom
-        if direction == "outgoing":
-            direction_emoji = "📞➡️"
-            direction_text = f"{agent_name} (Agent) called {customer_number} (Customer)"
-            call_summary = "**Agent called Customer**"
-        elif direction == "incoming":
-            direction_emoji = "📱➡️"
-            direction_text = f"{customer_number} (Customer) called {agent_name} (Agent)"
-            call_summary = "**Customer called Agent**"
-        else:
-            direction_emoji = "📞"
-            direction_text = "Unknown direction"
-            call_summary = "**Direction unknown**"
+        # Build Exotel recording link
+        exotel_link = call_data.get('recording_url', 'N/A')
         
-        message = f"""{direction_emoji} *{call_summary}*
-{direction_text}
+        # Build transcript section if provided
+        transcript_section = ""
+        if transcript:
+            transcript_section = f"""
 
-📞 *Support Number:*
-{support_number}
+📄 *Full Call Transcript:*
 
-📱 *Candidate/Customer Number:*
-{customer_number}
+{transcript}
 
-👤 *CS Agent:*
-{agent_line}
+━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+        
+        # Main message body - clean and focused
+        message = f"""📞 *Customer Support Call Summary*
 
-🏢 *Department:*
-{department}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-⏰ *Timestamp:*
-{timestamp_formatted}
+👤 *Customer:* {customer_legal_name}
+📱 *Customer Number:* `{customer_number}`
 
-📋 *Call Metadata:*
-• Call ID: `{call_data['call_id']}`
-• Duration: {duration_formatted}
-• Status: {call_data.get('status', 'Completed')}
-• Agent: {agent_name}
-• Customer Segment: {call_data.get('customer_segment', 'General')}
+👔 *Agent:* {agent_name} {agent_mention}
+🏢 *Department:* {department}
+
+📅 *Date of Call:* {date_only}
+🕐 *Time:* {timestamp_formatted}
+⏱️ *Duration:* {duration_formatted}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 📝 *Meeting Minutes (MOM):*
-{transcription}"""
+
+{mom}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔗 *Call Recording:* <{exotel_link}|Listen on Exotel>
+🆔 *Call ID:* `{call_data['call_id']}`{transcript_section}"""
         
-        return message
+        return {
+            'message': message,
+            'customer_number': customer_number,
+            'customer_legal_name': customer_legal_name,
+            'agent_name': agent_name,
+            'timestamp': timestamp_formatted,
+            'call_id': call_data['call_id'],
+            'exotel_link': exotel_link,
+            'mom': mom  # Store MOM separately for potential future use
+        }
     
     @staticmethod
-    def post_to_slack(message: str, webhook_url: str) -> bool:
-        """Post formatted message to Slack"""
+    def post_to_slack(message_data: Dict[str, Any], webhook_url: str) -> bool:
+        """Post formatted message to Slack
+        
+        Args:
+            message_data: Dict containing 'message' and other metadata
+            webhook_url: Slack webhook URL
+        """
         try:
+            main_message = message_data['message']
+            
+            # Post message via webhook
             payload = {
-                "text": message,
+                "text": main_message,
                 "mrkdwn": True,
                 "unfurl_links": False,
                 "unfurl_media": False
@@ -753,7 +791,7 @@ class SlackFormatter:
             )
             response.raise_for_status()
             
-            logger.info("✅ Successfully posted to Slack with user mentions")
+            logger.info("✅ Successfully posted message to Slack")
             return True
             
         except Exception as e:
@@ -806,10 +844,13 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
         
         # Format and post to Slack
         logger.info(f"Formatting message for Slack")
-        slack_message = SlackFormatter.format_message(call_data, mom)
+        slack_message_data = SlackFormatter.format_message(call_data, mom, transcription)
         
         logger.info(f"Posting to Slack")
-        success = SlackFormatter.post_to_slack(slack_message, SLACK_WEBHOOK_URL)
+        success = SlackFormatter.post_to_slack(
+            message_data=slack_message_data,
+            webhook_url=SLACK_WEBHOOK_URL
+        )
         
         # Mark as processed
         db_manager.mark_call_processed(call_data, transcription, success)
@@ -919,6 +960,38 @@ async def zapier_webhook(
         if not transcription_service:
             raise HTTPException(status_code=500, detail="Transcription service not configured")
         
+        # DEPARTMENT FILTER: Check if agent's department is allowed
+        if ALLOWED_DEPT_LIST:
+            # Detect agent from call numbers
+            agent_info = SlackFormatter.find_agent_from_call(
+                payload.from_number,
+                payload.to_number
+            )
+            
+            if agent_info:
+                agent_dept = agent_info.get('department', 'Unknown')
+                if agent_dept not in ALLOWED_DEPT_LIST:
+                    logger.info(f"🚫 Skipping call {call_id} - Agent department '{agent_dept}' not in allowed list")
+                    logger.info(f"   Allowed departments: {', '.join(ALLOWED_DEPT_LIST)}")
+                    logger.info(f"   Agent: {agent_info.get('name', 'Unknown')}")
+                    return WebhookResponse(
+                        success=True,
+                        message=f"Call skipped - Department '{agent_dept}' not in filter (allowed: {', '.join(ALLOWED_DEPT_LIST)})",
+                        call_id=call_id,
+                        timestamp=datetime.utcnow().isoformat() + "Z"
+                    )
+                else:
+                    logger.info(f"✅ Agent department '{agent_dept}' matches filter - processing call")
+            else:
+                logger.warning(f"⚠️ Could not detect agent for call {call_id} - skipping due to department filter")
+                logger.info(f"   From: {payload.from_number}, To: {payload.to_number}")
+                return WebhookResponse(
+                    success=True,
+                    message="Call skipped - Agent not found in database (department filter active)",
+                    call_id=call_id,
+                    timestamp=datetime.utcnow().isoformat() + "Z"
+                )
+        
         call_data = {
             'call_id': call_id,
             'from_number': payload.from_number,
@@ -1022,6 +1095,10 @@ async def startup_event():
     logger.info(f"Support Number: {SUPPORT_NUMBER}")
     logger.info(f"Rate Limiting: {PROCESSING_DELAY}s delay, {MAX_CONCURRENT_CALLS} concurrent calls")
     logger.info(f"Smart Agent Detection: Enabled ✅")
+    if ALLOWED_DEPT_LIST:
+        logger.info(f"🔍 Department Filter: ENABLED - Only processing: {', '.join(ALLOWED_DEPT_LIST)}")
+    else:
+        logger.info(f"🔍 Department Filter: DISABLED - Processing all departments")
     logger.info("=" * 60)
     
     Path("downloads").mkdir(exist_ok=True)
