@@ -1,427 +1,358 @@
-# Exotel-Slack Complete System
+# 🚀 Exotel to Slack MOM System - FINAL DEPLOYMENT
 
-**Automated call recording transcription and Slack posting system with Zapier integration**
+## 📦 Complete Render Deployment Package
 
-A production-ready system that automatically fetches Exotel call recordings, transcribes them using AssemblyAI, and posts formatted meeting minutes to Slack. Built to handle 50+ support agents with zero duplicate processing.
+This folder contains all the files needed to deploy the **Exotel to Slack MOM System** on Render.
 
-## ✨ Features
+---
 
-- ✅ **Zapier Integration**: Seamless webhook integration for automated workflows
-- ✅ **Duplicate Prevention**: SQLite-based deduplication ensures no call is processed twice
-- ✅ **Audio Transcription**: High-quality transcription using AssemblyAI with speaker detection
-- ✅ **Exact Format**: Posts to Slack in the EXACT format you specified (matches image)
-- ✅ **Call Direction Logic**: Automatically determines incoming vs outgoing calls
-- ✅ **Scalable**: Designed to handle 50+ concurrent support agents
-- ✅ **No AI Rephrasing**: Uses actual transcription text as MOM (Meeting Minutes)
-- ✅ **Background Processing**: Instant webhook responses with async transcription
-- ✅ **Production Ready**: Includes Docker, health checks, error handling, and logging
+## 📋 Files Included
 
-## 🏗️ Architecture
+| File | Purpose |
+|------|---------|
+| `app.py` | Main FastAPI application with all features |
+| `requirements.txt` | Python dependencies |
+| `agent_mapping.json` | Clean database with ONLY 12 CUSTOMER SUPPORT agents |
+| `env.example` | Environment variables template |
+| `CUSTOMER_SUPPORT_TEAM_CONFIGURED.md` | Documentation of configured agents |
+| `README.md` | This deployment guide |
 
-```
-┌─────────┐      ┌────────┐      ┌──────────────┐      ┌─────────────────┐      ┌───────┐
-│ Exotel  │─────▶│ Zapier │─────▶│ This System  │─────▶│  Transcription  │─────▶│ Slack │
-│  Call   │      │ Trigger│      │   (FastAPI)  │      │   (AssemblyAI)  │      │       │
-└─────────┘      └────────┘      └──────────────┘      └─────────────────┘      └───────┘
-                                          │
-                                          ▼
-                                   ┌──────────────┐
-                                   │   SQLite DB  │
-                                   │  (Duplicates)│
-                                   └──────────────┘
-```
+---
 
-## 📋 Requirements
+## ✨ Features Included
 
-- Python 3.11+
-- Slack Workspace with webhook
-- AssemblyAI API key (for transcription)
-- Exotel account with API credentials
-- Zapier account (Free tier works, but Pro+ recommended for high volume)
+✅ **Transcription**: OpenAI Whisper API  
+✅ **MOM Generation**: GPT-3.5-turbo with tone & issue type  
+✅ **Smart Agent Detection**: Matches phone numbers to agents  
+✅ **Department Filtering**: Only CUSTOMER SUPPORT agents  
+✅ **Slack Integration**: Posts with agent tagging  
+✅ **Transcript in Message**: Full transcript below recording link  
+✅ **Duplicate Prevention**: SQLite database tracking  
+✅ **Rate Limiting**: Built-in delays and semaphores  
+✅ **IST Timezone**: All timestamps in Indian Standard Time  
 
-## 🚀 Quick Start
+---
 
-### 1. Clone and Setup
+## 🚀 Render Deployment Steps
+
+### **Step 1: Create New Web Service**
+
+1. Go to [Render Dashboard](https://dashboard.render.com/)
+2. Click **"New +"** → **"Web Service"**
+3. Connect your GitHub repository
+4. Select the repository with these files
+
+### **Step 2: Configure Service**
+
+**Name:** `exotel-slackmom-final` (or your choice)  
+**Region:** Choose closest to your users  
+**Branch:** `main` (or your deployment branch)  
+**Root Directory:** `SLACKMOM FINAL` (if in subfolder)  
+**Runtime:** `Python 3`  
+**Build Command:** `pip install -r requirements.txt`  
+**Start Command:** `uvicorn app:app --host 0.0.0.0 --port $PORT`  
+
+### **Step 3: Add Environment Variables**
+
+Go to **Environment** tab and add these variables:
 
 ```bash
-cd exotel-slack-complete-system
-cp env.example .env
-```
-
-### 2. Configure Environment
-
-Edit `.env` file with your credentials:
-
-```env
+# Slack Configuration
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
-ASSEMBLYAI_API_KEY=your_assemblyai_api_key
+SLACK_BOT_TOKEN=xoxb-your-bot-token-here
+
+# OpenAI Configuration
+OPENAI_API_KEY=sk-your-openai-api-key-here
+
+# Exotel Configuration
 EXOTEL_API_KEY=your_exotel_api_key
 EXOTEL_API_TOKEN=your_exotel_api_token
-EXOTEL_SID=your_exotel_sid
+EXOTEL_SID=your_exotel_account_sid
+
+# Support Number (legacy, not critical)
 SUPPORT_NUMBER=09631084471
+
+# Database
+DATABASE_PATH=processed_calls.db
+
+# Rate Limiting
+PROCESSING_DELAY=5
+MAX_CONCURRENT_CALLS=3
+
+# Department Filter (IMPORTANT!)
+ALLOWED_DEPARTMENTS=CUSTOMER SUPPORT
+
+# Port (Render sets this automatically)
+PORT=10000
 ```
 
-### 3. Run Locally
+### **Step 4: Deploy**
 
-```bash
-# Install dependencies
-pip install -r requirements.txt
+1. Click **"Create Web Service"**
+2. Render will automatically:
+   - Clone your repo
+   - Install dependencies
+   - Start the service
+3. Wait for deployment to complete (2-3 minutes)
 
-# Run the application
-python app.py
+### **Step 5: Get Your Service URL**
+
+Once deployed, your service URL will be:
+```
+https://exotel-slackmom-final.onrender.com
 ```
 
-The server will start at `http://localhost:8000`
+**Important:** Copy this URL - you'll need it for Zapier!
 
-### 4. Run with Docker
+---
 
-```bash
-# Build and run
-docker-compose up -d
+## 🔗 Zapier Integration Setup
 
-# Check logs
-docker-compose logs -f
+### **Step 1: Create New Zap**
 
-# Stop
-docker-compose down
+1. **Trigger:** Schedule by Zapier
+   - Frequency: **Every Hour**
+   - Minute: `00` (runs at top of each hour)
+
+### **Step 2: Fetch Exotel Calls**
+
+2. **Action:** Webhooks by Zapier → GET Request
+   - URL: `https://api.exotel.com/v1/Accounts/YOUR_SID/Calls.json`
+   - Method: **GET**
+   - Basic Auth:
+     - Username: `YOUR_EXOTEL_API_KEY`
+     - Password: `YOUR_EXOTEL_API_TOKEN`
+   - Query Params:
+     - `From`: (leave empty - fetch all)
+     - `PageSize`: `100`
+     - `StartTime`: Set to 1 hour ago
+
+### **Step 3: Loop Through Calls**
+
+3. **Action:** Looping by Zapier
+   - Loop On: `Calls`
+   - Create Loop from Line-Items: Yes
+
+### **Step 4: Send to Your Service**
+
+4. **Action:** Webhooks by Zapier → POST Request
+   - URL: `https://exotel-slackmom-final.onrender.com/webhook/exotel`
+   - Method: **POST**
+   - Data (JSON):
+     ```json
+     {
+       "call_id": "{{Sid}}",
+       "from_number": "{{From}}",
+       "to_number": "{{To}}",
+       "duration": "{{Duration}}",
+       "recording_url": "{{RecordingUrl}}",
+       "status": "{{Status}}"
+     }
+     ```
+
+### **Step 5: Test & Enable**
+
+1. Test the Zap with a sample call
+2. Enable the Zap
+3. It will run every hour automatically
+
+---
+
+## 👥 Configured Agents (12 CUSTOMER SUPPORT)
+
+The system is configured to process calls from these 12 agents:
+
+1. Divya Karlapudi - 7799309499
+2. Vaibhav Agarwal - 9311633945
+3. Supriya Chettri - 8918062860
+4. Mohan - 7569954922
+5. Md Armaan - 9852338574
+6. Ragul A S - 9663175704
+7. Ruchi Mishra - 8582962326
+8. Mrinalini Krishnan - 9902352404
+9. Susmita Deb - 9330818130
+10. Syed Wali - 8126033006
+11. Uttkarsh Tripathi - 9721439156
+12. Arsh Ahmed Chauhan - 8219834257
+
+**Only calls involving these 12 agents will be processed and posted to Slack.**
+
+---
+
+## 🔍 Testing Your Deployment
+
+### **Test the Service is Running:**
+
+Visit in your browser:
+```
+https://exotel-slackmom-final.onrender.com/
 ```
 
-## 🌐 Deployment Options
-
-### Option A: Deploy to Render (Recommended - Free Tier Available)
-
-1. **Push to GitHub**
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial commit"
-   git remote add origin YOUR_REPO_URL
-   git push -u origin main
-   ```
-
-2. **Deploy on Render**
-   - Go to [render.com](https://render.com)
-   - Click "New +" → "Web Service"
-   - Connect your GitHub repository
-   - Render will auto-detect the `render.yaml` configuration
-   - Add environment variables in Render dashboard
-   - Click "Create Web Service"
-
-3. **Get Your URL**
-   ```
-   https://your-app-name.onrender.com
-   ```
-
-### Option B: Deploy to Railway
-
-1. Install Railway CLI: `npm install -g @railway/cli`
-2. Login: `railway login`
-3. Initialize: `railway init`
-4. Deploy: `railway up`
-5. Add environment variables: `railway variables`
-
-### Option C: Deploy to AWS/GCP/Azure
-
-Use the provided `Dockerfile` for containerized deployment.
-
-## 📡 API Endpoints
-
-### `POST /webhook/zapier`
-
-Main webhook endpoint for Zapier integration.
-
-**Request Body:**
+You should see:
 ```json
 {
-  "call_id": "CA1234567890abcdef",
-  "from_number": "+919876543210",
-  "to_number": "09631084471",
-  "duration": 125,
-  "recording_url": "https://exotel.com/recordings/xxx.mp3",
-  "timestamp": "2025-10-09T17:58:27Z",
-  "status": "completed",
-  "agent_name": "Prateek Raj",
-  "agent_slack_handle": "@prateek.raj",
-  "department": "Customer Success",
-  "customer_segment": "General"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Call queued for processing",
-  "call_id": "CA1234567890abcdef",
-  "timestamp": "2025-10-09T17:58:30Z"
-}
-```
-
-### `GET /health`
-
-Health check endpoint with statistics.
-
-**Response:**
-```json
-{
-  "status": "healthy",
-  "timestamp": "2025-10-09T17:58:30Z",
-  "database": "connected",
-  "stats": {
-    "total_processed": 150,
-    "successfully_posted": 148,
-    "failed": 2
-  },
-  "services": {
-    "transcription": "enabled",
-    "slack": "enabled"
+  "status": "active",
+  "message": "Exotel-Slack Complete System Running",
+  "endpoints": {
+    "webhook": "/webhook/exotel",
+    "health": "/health"
   }
 }
 ```
 
-### `GET /stats`
+### **Test with a Sample Call:**
 
-Get processing statistics.
-
-### `GET /call/{call_id}`
-
-Get details of a specific processed call.
-
-## 🔧 Configuration
-
-### Environment Variables
-
-| Variable | Required | Description | Example |
-|----------|----------|-------------|---------|
-| `SLACK_WEBHOOK_URL` | Yes | Slack incoming webhook URL | `https://hooks.slack.com/services/...` |
-| `ASSEMBLYAI_API_KEY` | Yes | AssemblyAI API key for transcription | `abc123...` |
-| `EXOTEL_API_KEY` | Yes | Exotel API key | `your_api_key` |
-| `EXOTEL_API_TOKEN` | Yes | Exotel API token | `your_api_token` |
-| `EXOTEL_SID` | Yes | Exotel account SID | `your_sid` |
-| `SUPPORT_NUMBER` | Yes | Your support phone number | `09631084471` |
-| `DATABASE_PATH` | No | Database file path | `processed_calls.db` |
-| `PORT` | No | Server port | `8000` |
-
-### Slack Message Format
-
-The system posts messages in this EXACT format (matching your image):
-
-```
-📞 Support Number:
-09631084471
-
-📱 Candidate/Customer Number:
-09631084471
-
-❗ Concern:
-Call inquiry: Person you are speaking with has put your call on ... (Tone: Neutral)
-
-👤 CS Agent:
-@prateek.raj <09631084471>
-
-🏢 Department:
-Customer Success
-
-⏰ Timestamp:
-2025-10-04 17:58:27 UTC
-
-📋 Call Metadata:
-• Call ID: `86d8a88279e4f1ad7417e6556c3e1984`
-• Duration: 56s
-• Status: Completed
-• Agent: Prateek Raj
-• Customer Segment: General
-
-📝 Full Transcription:
-```
-[Complete transcription with speaker labels]
-```
-
-🎧 Recording/Voice Note:
-Recording processed and transcribed above (as per no-audio requirement)
-```
-
-## 🔗 Zapier Integration
-
-See [ZAPIER_INTEGRATION_GUIDE.md](ZAPIER_INTEGRATION_GUIDE.md) for complete setup instructions.
-
-**Quick Overview:**
-
-1. **Trigger**: Exotel → "New Call" or "Call Completed"
-2. **Action**: Webhooks by Zapier → POST
-3. **URL**: `https://your-app.onrender.com/webhook/zapier`
-4. **Payload**: Map Exotel fields to JSON format above
-5. **Test**: Run test call and verify Slack message
-
-## 🎯 Call Direction Logic
-
-The system automatically determines call direction:
-
-**Incoming Call:**
-- From = Customer/Candidate number
-- To = Support number
-
-**Outgoing Call:**
-- From = Support number
-- To = Customer/Candidate number
-
-Logic: If `from_number` contains `SUPPORT_NUMBER`, it's outgoing; otherwise incoming.
-
-## 🔒 Duplicate Prevention
-
-The system uses SQLite database to track processed calls:
-
-- Each call is identified by unique `call_id` (Exotel Sid)
-- Before processing, checks if `call_id` exists in database
-- If duplicate detected, returns success but skips processing
-- No call is ever transcribed or posted twice
-
-**Database Schema:**
-```sql
-CREATE TABLE processed_calls (
-    call_id TEXT PRIMARY KEY,
-    from_number TEXT,
-    to_number TEXT,
-    duration INTEGER,
-    timestamp TEXT,
-    processed_at TEXT,
-    transcription_text TEXT,
-    slack_posted BOOLEAN,
-    status TEXT
-)
-```
-
-## 📊 Handling 50+ Agents
-
-The system is designed to scale:
-
-- **Async Processing**: Background tasks don't block webhook responses
-- **Fast Responses**: Zapier receives instant acknowledgment (< 100ms)
-- **Concurrent Processing**: Multiple calls processed simultaneously
-- **Database Locking**: SQLite handles concurrent access safely
-- **Error Isolation**: One failed call doesn't affect others
-
-**Recommended Setup for High Volume:**
-- Deploy on Render Standard plan or higher (not free tier)
-- Use Zapier Professional+ for faster triggers (1-minute polling)
-- Consider upgrading to PostgreSQL for very high volume (>1000 calls/day)
-
-## 🧪 Testing
-
-### Test Health Endpoint
-
+Use curl or Postman:
 ```bash
-curl https://your-app.onrender.com/health
-```
-
-### Test Webhook with Sample Data
-
-```bash
-curl -X POST https://your-app.onrender.com/webhook/zapier \
+curl -X POST https://exotel-slackmom-final.onrender.com/webhook/exotel \
   -H "Content-Type: application/json" \
   -d '{
-    "call_id": "TEST123456",
-    "from_number": "+919876543210",
-    "to_number": "09631084471",
-    "duration": 60,
-    "recording_url": "https://example.com/test.mp3",
-    "agent_name": "Test Agent",
-    "agent_slack_handle": "@test",
-    "department": "Customer Success",
-    "customer_segment": "General"
+    "call_id": "test123",
+    "from_number": "7799309499",
+    "to_number": "9876543210",
+    "duration": "120",
+    "recording_url": "https://example.com/recording.mp3",
+    "status": "completed"
   }'
 ```
 
-### Test with Actual Exotel Recording
+---
 
-See [TESTING_GUIDE.md](TESTING_GUIDE.md) for comprehensive testing procedures.
+## 📊 Monitoring
 
-## 🐛 Troubleshooting
+### **Check Render Logs:**
 
-### Issue: Webhook not receiving calls
+1. Go to Render Dashboard
+2. Click your service
+3. Click **"Logs"** tab
+4. You'll see:
+   ```
+   📞 Processing call from 7799309499
+   ✅ Agent found: Divya Karlapudi - Department: CUSTOMER SUPPORT
+   🎤 Transcribing audio...
+   📝 Generating MOM...
+   📤 Posting to Slack...
+   ✅ Successfully completed
+   ```
 
-**Check:**
-- Is Zapier Zap turned on?
-- Is webhook URL correct in Zapier?
-- Check Zapier Task History for errors
+### **Check Slack:**
 
-**Solution:**
-- Verify URL: `curl https://your-app.onrender.com/health`
-- Check Render logs for incoming requests
-- Test webhook with curl command above
-
-### Issue: Transcription fails
-
-**Check:**
-- Is `ASSEMBLYAI_API_KEY` set correctly?
-- Is recording URL accessible?
-- Check Render logs for transcription errors
-
-**Solution:**
-- Verify AssemblyAI API key
-- Test recording URL manually
-- Check Exotel credentials for recording download
-
-### Issue: Slack messages not posting
-
-**Check:**
-- Is `SLACK_WEBHOOK_URL` set correctly?
-- Test webhook URL with curl:
-  ```bash
-  curl -X POST YOUR_SLACK_WEBHOOK_URL \
-    -H 'Content-Type: application/json' \
-    -d '{"text":"Test message"}'
-  ```
-
-### Issue: Duplicates being processed
-
-**Check:**
-- Is database persisting between restarts?
-- Check database file exists and is writable
-- Verify `call_id` is unique in Exotel data
-
-**Solution:**
-- Ensure persistent storage is enabled (Render: use disk storage)
-- Check file permissions
-- Query database: `sqlite3 processed_calls.db "SELECT * FROM processed_calls"`
-
-## 📖 Additional Documentation
-
-- [ZAPIER_INTEGRATION_GUIDE.md](ZAPIER_INTEGRATION_GUIDE.md) - Complete Zapier setup
-- [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) - Detailed deployment instructions
-- [API_REFERENCE.md](API_REFERENCE.md) - Complete API documentation
-- [TESTING_GUIDE.md](TESTING_GUIDE.md) - Testing procedures
-
-## 🤝 Support
-
-For issues or questions:
-
-1. Check the troubleshooting section above
-2. Review logs: `docker-compose logs -f` (Docker) or Render dashboard (cloud)
-3. Check Zapier Task History
-4. Verify all environment variables are set correctly
-
-## 📝 License
-
-MIT License - feel free to use and modify for your needs.
-
-## 🎯 Features Checklist
-
-- [x] Zapier webhook integration
-- [x] Exotel recording download
-- [x] AssemblyAI transcription with speaker labels
-- [x] Duplicate prevention with SQLite
-- [x] Exact Slack format matching image
-- [x] Call direction logic (incoming/outgoing)
-- [x] Background async processing
-- [x] Handles 50+ agents
-- [x] No AI rephrasing (actual transcription as MOM)
-- [x] Docker support
-- [x] Health checks and monitoring
-- [x] Error handling and logging
-- [x] Production-ready deployment
+Look for messages in your configured Slack channel with:
+- Customer details
+- Agent name with email tag
+- Date and time (IST)
+- MOM with tone & issue type
+- Full transcript below recording link
 
 ---
 
-**Built with FastAPI, AssemblyAI, and Slack** 🚀
+## 🛠️ Troubleshooting
+
+### **Service not starting:**
+- Check Render logs for errors
+- Verify all environment variables are set
+- Ensure `requirements.txt` is in the root directory
+
+### **No Slack posts:**
+- Verify `SLACK_WEBHOOK_URL` is correct
+- Check if calls are from CUSTOMER SUPPORT agents
+- Look at Render logs for "Skipping call" messages
+
+### **Transcription errors:**
+- Verify `OPENAI_API_KEY` is valid
+- Check OpenAI account has credits
+- Ensure recording URL is accessible
+
+### **Wrong agent detection:**
+- Verify phone numbers in `agent_mapping.json`
+- Check phone number normalization (removes 0, country codes)
+- Review Render logs for "Agent found" messages
+
+---
+
+## 📝 Adding New Agents
+
+To add a new CUSTOMER SUPPORT agent:
+
+1. Edit `agent_mapping.json`:
+   ```json
+   "9876543210": {
+     "name": "New Agent Name",
+     "email": "agent@springverify.in",
+     "department": "CUSTOMER SUPPORT",
+     "team": "Support"
+   }
+   ```
+
+2. Commit and push to Git:
+   ```bash
+   git add agent_mapping.json
+   git commit -m "Add new agent"
+   git push
+   ```
+
+3. Render will auto-deploy the update
+
+---
+
+## 💰 Cost Estimates
+
+### **Free Tier (For Testing):**
+- ✅ Render: Free (with sleep after 15 min inactivity)
+- ✅ Zapier: Free (100 tasks/month)
+- ❌ OpenAI: Pay-per-use (no free tier)
+
+### **Production (Recommended):**
+- 💵 Render Starter: $7/month (always on, no sleep)
+- 💵 Zapier Professional: $20/month (2000 tasks)
+- 💵 OpenAI Tier 1: ~$5-10/month (depends on usage)
+
+**Total: ~$32-37/month for reliable production service**
+
+---
+
+## 🎯 What's Next?
+
+### **Optional Enhancements:**
+
+1. **Google Sheets Integration:**
+   - Fetch customer names from Google Sheets
+   - Replace "Customer 9876543210" with actual names
+
+2. **Multi-Department Support:**
+   - Change `ALLOWED_DEPARTMENTS=CUSTOMER SUPPORT,SUPPORT CAND,EMP`
+   - Process calls from multiple departments
+
+3. **Custom Slack Channels:**
+   - Route different departments to different channels
+   - Add channel routing logic in app.py
+
+4. **Analytics Dashboard:**
+   - Track call volume, tone distribution
+   - Generate weekly reports
+
+---
+
+## ✅ You're All Set!
+
+This deployment package has everything you need. Just:
+
+1. ✅ Push files to Git
+2. ✅ Deploy on Render
+3. ✅ Configure Zapier
+4. ✅ Watch calls flow into Slack!
+
+**Questions?** Check `CUSTOMER_SUPPORT_TEAM_CONFIGURED.md` for agent details.
+
+---
+
+## 📞 Support
+
+For issues or questions about this deployment:
+- Check Render logs first
+- Verify environment variables
+- Test with sample calls
+- Review agent_mapping.json for correct phone numbers
+
+**Happy deploying! 🚀**
 
