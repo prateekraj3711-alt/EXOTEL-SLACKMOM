@@ -835,7 +835,7 @@ class SlackFormatter:
             # Check if from_number matches
             if mapped_clean == from_clean:
                 email = agent_data.get('email', '')
-                slack_mention = f"<@{email}>" if email else "@support"
+                slack_mention = f"📧 {email}" if email else "@support"
                 
                 logger.info(f"✅ Found agent (from_number) in database: {agent_data.get('name')} - {email}")
                 return {
@@ -852,7 +852,7 @@ class SlackFormatter:
             # Check if to_number matches
             if mapped_clean == to_clean:
                 email = agent_data.get('email', '')
-                slack_mention = f"<@{email}>" if email else "@support"
+                slack_mention = f"📧 {email}" if email else "@support"
                 
                 logger.info(f"✅ Found agent (to_number) in database: {agent_data.get('name')} - {email}")
                 return {
@@ -944,8 +944,8 @@ class SlackFormatter:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-👤 *Customer:* {customer_legal_name}
 📱 *Customer Number:* `{customer_number}`
+📞 *Support Number:* `{agent_number}`
 
 👔 *Agent:* {agent_name} {agent_mention}
 🏢 *Department:* {department}
