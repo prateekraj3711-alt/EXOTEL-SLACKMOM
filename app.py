@@ -40,6 +40,8 @@ app = FastAPI(
 SLACK_WEBHOOK_URL = os.environ.get('SLACK_WEBHOOK_URL')
 SLACK_BOT_TOKEN = os.environ.get('SLACK_BOT_TOKEN')
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
+GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET')
 EXOTEL_API_KEY = os.environ.get('EXOTEL_API_KEY')
 EXOTEL_API_TOKEN = os.environ.get('EXOTEL_API_TOKEN')
 EXOTEL_SID = os.environ.get('EXOTEL_SID')
@@ -332,6 +334,12 @@ Analyze this call transcription and create a structured MOM with these sections:
 **Tone:** [REQUIRED - Choose ONE: "Normal" or "Escalation"]
 Determine if the call is an escalation (customer is frustrated/angry/upset/demanding manager) or normal (regular inquiry/polite conversation).
 
+**Mood Analysis:** [REQUIRED - Choose ONE: "Satisfied", "Neutral", "Frustrated", "Angry", "Confused", "Relieved"]
+Analyze the customer's emotional state throughout the call and overall satisfaction level.
+
+**Concern Type:** [REQUIRED - Choose ONE or MORE from: Case Status Update, Insufficiency, Recharge, Product, Miscellaneous, Employment Verification, Document Issue, Payment Issue, Technical Problem]
+Categorize the main concern or issue type discussed. Can be multiple types separated by commas.
+
 **Issue Type:** [REQUIRED - Choose ONE or MORE from: Case Status Update, Insufficiency, Recharge, Product, Miscellaneous]
 Categorize the main topics discussed. Can be multiple types separated by commas.
 
@@ -356,10 +364,13 @@ CRITICAL REQUIREMENTS:
 - Include direct quotes or verbatim statements whenever possible
 - Each section should be detailed and informative
 - Include specific details from the transcription
-- MUST include Tone and Issue Type at the beginning
+- MUST include Tone, Mood Analysis, and Concern Type at the beginning
+- Mood Analysis is MANDATORY for customer satisfaction tracking
 
 FORMAT:
 **Tone:** [Normal/Escalation]
+**Mood Analysis:** [Satisfied/Neutral/Frustrated/Angry/Confused/Relieved]
+**Concern Type:** [Case Status Update/Insufficiency/Recharge/Product/Miscellaneous/Employment Verification/Document Issue/Payment Issue/Technical Problem]
 **Issue Type:** [One or more categories]
 
 **Customer Issue:**
@@ -384,7 +395,7 @@ Create the MOM in a clear, professional format with actual conversation content.
                     "messages": [
                         {
                             "role": "system",
-                            "content": "You are a professional customer support analyst who creates detailed, well-structured meeting minutes with sufficient context."
+                            "content": "You are a professional customer support analyst who creates detailed, well-structured meeting minutes with sufficient context. ALWAYS include Tone, Mood Analysis, and Concern Type fields in your response. These are critical for tracking customer satisfaction and issue categorization."
                         },
                         {
                             "role": "user",
@@ -436,7 +447,12 @@ Create the MOM in a clear, professional format with actual conversation content.
         logger.error("OpenAI API unavailable after all retries. Using structured fallback.")
         logger.warning("Falling back to structured transcription with 3+ lines")
         
-        fallback_mom = f"""**Call Summary:**
+        fallback_mom = f"""**Tone:** Normal
+**Mood Analysis:** Neutral
+**Concern Type:** Miscellaneous
+**Issue Type:** Miscellaneous
+
+**Call Summary:**
 The call was regarding a customer support inquiry. The conversation lasted {len(transcription)} characters.
 
 **Transcription:**
@@ -450,6 +466,211 @@ The call was regarding a customer support inquiry. The conversation lasted {len(
 • Update ticket with call details"""
         
         return fallback_mom
+
+
+# Google Drive Integration Service
+class GoogleDriveService:
+    """Upload transcript files to Google Drive for automatic NotebookLM sync"""
+    
+    def __init__(self, client_id: str = None, client_secret: str = None):
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.service = None
+        self.folder_id = None
+        
+    def setup_drive_service(self):
+        """Initialize Google Drive API service"""
+        try:
+            from google.oauth2.credentials import Credentials
+            from google_auth_oauthlib.flow import InstalledAppFlow
+            from google.auth.transport.requests import Request
+            from googleapiclient.discovery import build
+            import pickle
+            import os
+            
+            SCOPES = ['https://www.googleapis.com/auth/drive.file']
+            
+            creds = None
+            # Check if token.pickle exists
+            if os.path.exists('token.pickle'):
+                with open('token.pickle', 'rb') as token:
+                    creds = pickle.load(token)
+            
+            # If no valid credentials, get new ones
+            if not creds or not creds.valid:
+                if creds and creds.expired and creds.refresh_token:
+                    creds.refresh(Request())
+                else:
+                    if self.client_id and self.client_secret:
+                        from google_auth_oauthlib.flow import Flow
+                        flow = Flow.from_client_config(
+                            {
+                                "web": {
+                                    "client_id": self.client_id,
+                                    "client_secret": self.client_secret,
+                                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                                    "token_uri": "https://oauth2.googleapis.com/token",
+                                    "redirect_uris": ["http://localhost:8080"]
+                                }
+                            },
+                            SCOPES
+                        )
+                        # For server deployment, we'll use a different approach
+                        logger.warning("Google Drive OAuth requires manual setup - using local file fallback")
+                        return False
+                    else:
+                        logger.warning("Google Drive credentials not found - file upload disabled")
+                        return False
+                
+                # Save credentials for next run
+                with open('token.pickle', 'wb') as token:
+                    pickle.dump(creds, token)
+            
+            self.service = build('drive', 'v3', credentials=creds)
+            
+            # Create or find the transcripts folder
+            self.folder_id = self._create_or_find_folder()
+            return True
+            
+        except ImportError:
+            logger.warning("Google Drive libraries not installed - file upload disabled")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to setup Google Drive service: {e}")
+            return False
+    
+    def _create_or_find_folder(self):
+        """Create or find the Exotel Transcripts folder in Google Drive"""
+        try:
+            # Search for existing folder
+            results = self.service.files().list(
+                q="name='Exotel Transcripts' and mimeType='application/vnd.google-apps.folder'",
+                fields="files(id, name)"
+            ).execute()
+            
+            folders = results.get('files', [])
+            
+            if folders:
+                # Folder exists, return its ID
+                folder_id = folders[0]['id']
+                logger.info(f"Found existing 'Exotel Transcripts' folder: {folder_id}")
+                return folder_id
+            else:
+                # Create new folder
+                folder_metadata = {
+                    'name': 'Exotel Transcripts',
+                    'mimeType': 'application/vnd.google-apps.folder'
+                }
+                
+                folder = self.service.files().create(
+                    body=folder_metadata,
+                    fields='id'
+                ).execute()
+                
+                folder_id = folder.get('id')
+                logger.info(f"Created new 'Exotel Transcripts' folder: {folder_id}")
+                return folder_id
+                
+        except Exception as e:
+            logger.error(f"Failed to create/find folder: {e}")
+            return None
+    
+    def send_transcript(self, transcript: str, call_data: Dict[str, Any]) -> bool:
+        """Upload structured transcript file to Google Drive for automatic NotebookLM sync"""
+        try:
+            call_id = call_data.get('call_id', 'unknown')
+            customer_number = call_data.get('from_number', 'unknown')
+            agent_number = call_data.get('to_number', 'unknown')
+            timestamp = call_data.get('start_time', 'unknown')
+            duration = call_data.get('duration', 'unknown')
+            
+            # Create structured transcript content for NotebookLM
+            structured_transcript = f"""CALL TRANSCRIPT - {call_id}
+========================================
+
+CALL METADATA:
+- Call ID: {call_id}
+- Customer Number: {customer_number}
+- Agent Number: {agent_number}
+- Date/Time: {timestamp}
+- Duration: {duration}
+- Source: Exotel Call Recording
+
+TRANSCRIPT CONTENT:
+{transcript}
+
+========================================
+END OF TRANSCRIPT - {call_id}
+"""
+            
+            # Setup Google Drive service if not already done
+            if not self.service:
+                if not self.setup_drive_service():
+                    logger.warning("Google Drive service not available - saving to local file instead")
+                    return self._save_local_file(structured_transcript, call_id, timestamp)
+            
+            # Upload to Google Drive
+            filename = f"transcript_{call_id}_{timestamp.replace(':', '-').replace(' ', '_')}.txt"
+            
+            # Create file metadata
+            file_metadata = {
+                'name': filename,
+                'parents': [self.folder_id] if self.folder_id else []
+            }
+            
+            # Create media upload
+            from googleapiclient.http import MediaIoBaseUpload
+            import io
+            
+            media = MediaIoBaseUpload(
+                io.BytesIO(structured_transcript.encode('utf-8')),
+                mimetype='text/plain',
+                resumable=True
+            )
+            
+            # Upload file
+            file = self.service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id'
+            ).execute()
+            
+            file_id = file.get('id')
+            logger.info(f"📚 Transcript uploaded to Google Drive: {filename}")
+            logger.info(f"📄 Transcript length: {len(transcript)} characters")
+            logger.info(f"🔗 Google Drive file ID: {file_id}")
+            logger.info(f"📁 File will automatically appear in NotebookLM when Google Drive is connected")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to upload transcript to Google Drive: {e}")
+            # Fallback to local file
+            logger.info("Falling back to local file storage...")
+            return self._save_local_file(structured_transcript, call_id, timestamp)
+    
+    def _save_local_file(self, structured_transcript: str, call_id: str, timestamp: str) -> bool:
+        """Fallback method to save transcript locally"""
+        try:
+            import os
+            filename = f"transcript_{call_id}_{timestamp.replace(':', '-').replace(' ', '_')}.txt"
+            filepath = f"transcripts/{filename}"
+            
+            # Create transcripts directory if it doesn't exist
+            os.makedirs("transcripts", exist_ok=True)
+            
+            # Write transcript to file
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(structured_transcript)
+            
+            logger.info(f"📚 Transcript saved to local file: {filepath}")
+            logger.info(f"📁 File ready for manual upload to NotebookLM: {filename}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to save local transcript file: {e}")
+            return False
 
 
 # Slack User Lookup Service
@@ -716,16 +937,7 @@ class SlackFormatter:
         # Build Exotel recording link
         exotel_link = call_data.get('recording_url', 'N/A')
         
-        # Build transcript section if provided
-        transcript_section = ""
-        if transcript:
-            transcript_section = f"""
-
-📄 *Full Call Transcript:*
-
-{transcript}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+        # Transcript section removed - transcripts now go to NotebookLM only
         
         # Main message body - clean and focused
         message = f"""📞 *Customer Support Call Summary*
@@ -751,7 +963,7 @@ class SlackFormatter:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🔗 *Call Recording:* <{exotel_link}|Listen on Exotel>
-🆔 *Call ID:* `{call_data['call_id']}`{transcript_section}"""
+🆔 *Call ID:* `{call_data['call_id']}`"""
         
         return {
             'message': message,
@@ -802,6 +1014,7 @@ class SlackFormatter:
 # Initialize services
 transcription_service = TranscriptionService(OPENAI_API_KEY) if OPENAI_API_KEY else None
 mom_generator = MOMGenerator(OPENAI_API_KEY) if OPENAI_API_KEY else None
+google_drive_service = GoogleDriveService(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET) if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET else None
 
 
 # Background processing with threading semaphore
@@ -834,6 +1047,17 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
         
         logger.info(f"Transcription completed: {len(transcription)} characters")
         
+        # Upload transcript to Google Drive for automatic NotebookLM sync
+        if google_drive_service:
+            logger.info(f"Uploading transcript to Google Drive for call {call_id}")
+            drive_success = google_drive_service.send_transcript(transcription, call_data)
+            if drive_success:
+                logger.info(f"✅ Transcript successfully uploaded to Google Drive")
+            else:
+                logger.warning(f"⚠️ Failed to upload transcript to Google Drive")
+        else:
+            logger.warning("Google Drive service not available - transcript not uploaded")
+        
         # Generate MOM from transcription
         if mom_generator:
             logger.info(f"Generating MOM for call {call_id}")
@@ -842,9 +1066,9 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
             logger.warning("MOM generator not available, using transcription")
             mom = transcription
         
-        # Format and post to Slack
+        # Format and post to Slack (MOM only, no transcript)
         logger.info(f"Formatting message for Slack")
-        slack_message_data = SlackFormatter.format_message(call_data, mom, transcription)
+        slack_message_data = SlackFormatter.format_message(call_data, mom, "")
         
         logger.info(f"Posting to Slack")
         success = SlackFormatter.post_to_slack(
@@ -926,6 +1150,7 @@ async def health_check():
         "services": {
             "transcription": "enabled (OpenAI Whisper)" if transcription_service else "disabled",
             "mom_generator": "enabled" if mom_generator else "disabled",
+            "google_drive": "enabled" if google_drive_service else "disabled (set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)",
             "slack": "enabled" if SLACK_WEBHOOK_URL else "disabled",
             "slack_user_lookup": "enabled" if slack_user_lookup else "disabled (set SLACK_BOT_TOKEN)",
             "agent_database": f"{len(AGENT_MAPPING)} agents loaded"
@@ -1090,6 +1315,7 @@ async def startup_event():
     logger.info(f"Agent Database: {len(AGENT_MAPPING)} agents loaded")
     logger.info(f"Transcription: {'Enabled (OpenAI Whisper)' if transcription_service else 'Disabled'}")
     logger.info(f"MOM Generator: {'Enabled' if mom_generator else 'Disabled'}")
+    logger.info(f"Google Drive: {'Enabled' if google_drive_service else 'Disabled (set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)'}")
     logger.info(f"Slack: {'Enabled' if SLACK_WEBHOOK_URL else 'Disabled'}")
     logger.info(f"Slack User Lookup: {'Enabled' if slack_user_lookup else 'Disabled (set SLACK_BOT_TOKEN)'}")
     logger.info(f"Support Number: {SUPPORT_NUMBER}")
