@@ -479,58 +479,52 @@ class GoogleDriveService:
         self.folder_id = None
         
     def setup_drive_service(self):
-        """Initialize Google Drive API service"""
+        """Initialize Google Drive API service using service account"""
         try:
-            from google.oauth2.credentials import Credentials
-            from google_auth_oauthlib.flow import InstalledAppFlow
-            from google.auth.transport.requests import Request
-            from googleapiclient.discovery import build
-            import pickle
+            import json
             import os
+            from google.oauth2 import service_account
+            from googleapiclient.discovery import build
             
+            # Check for service account JSON in environment variable
+            service_account_json = os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON')
+            
+            if not service_account_json:
+                logger.warning("GOOGLE_SERVICE_ACCOUNT_JSON not found - using local file fallback")
+                logger.info("To enable Google Drive upload:")
+                logger.info("1. Create a service account in Google Cloud Console")
+                logger.info("2. Download the service account JSON key")
+                logger.info("3. Add GOOGLE_SERVICE_ACCOUNT_JSON environment variable to Render")
+                return False
+            
+            # Parse the service account JSON
+            try:
+                service_account_info = json.loads(service_account_json)
+            except json.JSONDecodeError as e:
+                logger.error(f"Invalid JSON in GOOGLE_SERVICE_ACCOUNT_JSON: {e}")
+                return False
+            
+            # Define the scopes
             SCOPES = ['https://www.googleapis.com/auth/drive.file']
             
-            creds = None
-            # Check if token.pickle exists
-            if os.path.exists('token.pickle'):
-                with open('token.pickle', 'rb') as token:
-                    creds = pickle.load(token)
+            # Create credentials from service account
+            credentials = service_account.Credentials.from_service_account_info(
+                service_account_info, scopes=SCOPES
+            )
             
-            # If no valid credentials, get new ones
-            if not creds or not creds.valid:
-                if creds and creds.expired and creds.refresh_token:
-                    creds.refresh(Request())
-                else:
-                    if self.client_id and self.client_secret:
-                        from google_auth_oauthlib.flow import Flow
-                        flow = Flow.from_client_config(
-                            {
-                                "web": {
-                                    "client_id": self.client_id,
-                                    "client_secret": self.client_secret,
-                                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                                    "token_uri": "https://oauth2.googleapis.com/token",
-                                    "redirect_uris": ["http://localhost:8080"]
-                                }
-                            },
-                            SCOPES
-                        )
-                        # For server deployment, we'll use a different approach
-                        logger.warning("Google Drive OAuth requires manual setup - using local file fallback")
-                        return False
-                    else:
-                        logger.warning("Google Drive credentials not found - file upload disabled")
-                        return False
-                
-                # Save credentials for next run
-                with open('token.pickle', 'wb') as token:
-                    pickle.dump(creds, token)
-            
-            self.service = build('drive', 'v3', credentials=creds)
+            # Build the Drive service
+            self.service = build('drive', 'v3', credentials=credentials)
             
             # Create or find the transcripts folder
             self.folder_id = self._create_or_find_folder()
-            return True
+            
+            if self.folder_id:
+                logger.info("✅ Google Drive service initialized successfully")
+                logger.info(f"📁 Using folder ID: {self.folder_id}")
+                return True
+            else:
+                logger.error("Failed to create/find transcripts folder")
+                return False
             
         except ImportError:
             logger.warning("Google Drive libraries not installed - file upload disabled")
@@ -581,7 +575,7 @@ class GoogleDriveService:
             call_id = call_data.get('call_id', 'unknown')
             customer_number = call_data.get('from_number', 'unknown')
             agent_number = call_data.get('to_number', 'unknown')
-            timestamp = call_data.get('start_time', 'unknown')
+            timestamp = call_data.get('timestamp', 'unknown')
             duration = call_data.get('duration', 'unknown')
             
             # Create structured transcript content for NotebookLM
@@ -650,7 +644,7 @@ END OF TRANSCRIPT - {call_id}
             return self._save_local_file(structured_transcript, call_id, timestamp)
     
     def _save_local_file(self, structured_transcript: str, call_id: str, timestamp: str) -> bool:
-        """Fallback method to save transcript locally"""
+        """Save transcript locally for manual upload to NotebookLM"""
         try:
             import os
             filename = f"transcript_{call_id}_{timestamp.replace(':', '-').replace(' ', '_')}.txt"
@@ -665,6 +659,10 @@ END OF TRANSCRIPT - {call_id}
             
             logger.info(f"📚 Transcript saved to local file: {filepath}")
             logger.info(f"📁 File ready for manual upload to NotebookLM: {filename}")
+            logger.info(f"💡 To enable automatic Google Drive upload:")
+            logger.info(f"   1. Follow the setup guide: GOOGLE_CLOUD_SERVICE_ACCOUNT_SETUP.md")
+            logger.info(f"   2. Add GOOGLE_SERVICE_ACCOUNT_JSON environment variable to Render")
+            logger.info(f"   3. Redeploy the application")
             
             return True
             
@@ -945,7 +943,7 @@ class SlackFormatter:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 📱 *Customer Number:* `{customer_number}`
-📞 *Support Number:* `{agent_number}`
+📞 *Support Number:* `{support_number}`
 
 👔 *Agent:* {agent_name} {agent_mention}
 🏢 *Department:* {department}
