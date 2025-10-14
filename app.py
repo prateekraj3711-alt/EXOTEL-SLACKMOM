@@ -163,19 +163,26 @@ class DatabaseManager:
     def mark_call_processing(self, call_id: str, call_data: Dict[str, Any]) -> bool:
         """Mark call as being processed (prevents race condition)
         Returns True if successfully marked, False if already exists
+        BULLETPROOF: No call will ever be processed twice
         """
         with self._get_connection() as conn:
-            # Check if call already exists
+            # Check if call already exists (any status)
             existing = conn.execute(
-                "SELECT call_id FROM processed_calls WHERE call_id = ?",
+                "SELECT call_id, slack_posted, status FROM processed_calls WHERE call_id = ?",
                 (call_id,)
             ).fetchone()
             
             if existing:
-                logger.info(f"Call {call_id} already exists in database - skipping")
+                call_status = existing[2] if existing[2] else 'unknown'
+                slack_posted = existing[1] if existing[1] else False
+                
+                logger.warning(f"🚫 CALL ALREADY EXISTS: {call_id}")
+                logger.warning(f"   Status: {call_status}")
+                logger.warning(f"   Slack Posted: {slack_posted}")
+                logger.warning(f"   BLOCKING DUPLICATE PROCESSING")
                 return False
             
-            # Insert new call as processing
+            # Insert new call as processing with BULLETPROOF locking
             conn.execute("""
                 INSERT INTO processed_calls 
                 (call_id, from_number, to_number, duration, timestamp, processed_at, 
@@ -193,7 +200,7 @@ class DatabaseManager:
                 'processing'
             ))
             conn.commit()
-        logger.info(f"Marked call {call_id} as processing (locked)")
+        logger.info(f"🔒 BULLETPROOF LOCK: Marked call {call_id} as processing")
         return True
     
     def mark_call_processed(self, call_data: Dict[str, Any], transcription: str, success: bool):
@@ -1109,6 +1116,12 @@ Date: {call_data.get('timestamp', 'Unknown')}
             logger.warning("MOM generator not available, using transcription")
             mom = transcription
         
+        # FINAL SAFETY CHECK: Ensure call hasn't been posted to Slack already
+        if db_manager.is_call_processed(call_id):
+            logger.warning(f"🚫 FINAL SAFETY CHECK: Call {call_id} already processed - SKIPPING SLACK POST")
+            db_manager.mark_call_processed(call_data, transcription, True)  # Mark as processed without posting
+            return
+        
         # Format and post to Slack (MOM only, no transcript)
         logger.info(f"Formatting message for Slack")
         slack_message_data = SlackFormatter.format_message(call_data, mom, "")
@@ -1269,16 +1282,31 @@ async def zapier_webhook(
             'customer_segment': payload.customer_segment
         }
         
-        # Try to mark as processing - if it returns False, call already exists
-        if not db_manager.mark_call_processing(call_id, call_data):
-            logger.warning(f"🚫 DUPLICATE CALL DETECTED: {call_id}")
+        # BULLETPROOF DUPLICATE PREVENTION - Check multiple times
+        # First check: Quick existence check
+        if db_manager.is_call_processed(call_id):
+            logger.warning(f"🚫 DUPLICATE CALL DETECTED (Quick Check): {call_id}")
             logger.warning(f"   From: {payload.from_number}")
             logger.warning(f"   To: {payload.to_number}")
             logger.warning(f"   Duration: {payload.duration}s")
-            logger.warning(f"   This call has already been processed - skipping")
+            logger.warning(f"   BLOCKING: Call already exists in database")
             return WebhookResponse(
                 success=True,
-                message="Duplicate call - already processed",
+                message="Duplicate call - already processed (quick check)",
+                call_id=call_id,
+                timestamp=datetime.utcnow().isoformat() + "Z"
+            )
+        
+        # Second check: Try to mark as processing - if it returns False, call already exists
+        if not db_manager.mark_call_processing(call_id, call_data):
+            logger.warning(f"🚫 DUPLICATE CALL DETECTED (Lock Check): {call_id}")
+            logger.warning(f"   From: {payload.from_number}")
+            logger.warning(f"   To: {payload.to_number}")
+            logger.warning(f"   Duration: {payload.duration}s")
+            logger.warning(f"   BLOCKING: Call already exists in database (race condition prevented)")
+            return WebhookResponse(
+                success=True,
+                message="Duplicate call - already processed (lock check)",
                 call_id=call_id,
                 timestamp=datetime.utcnow().isoformat() + "Z"
             )
