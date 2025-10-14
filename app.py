@@ -147,35 +147,62 @@ class DatabaseManager:
             conn.close()
     
     def is_call_processed(self, call_id: str) -> bool:
-        """Check if call has been processed"""
+        """Check if call has been successfully processed and posted to Slack in the last hour"""
         with self._get_connection() as conn:
+            # Only check for duplicates in the last hour
+            one_hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
             result = conn.execute(
-                "SELECT call_id FROM processed_calls WHERE call_id = ?",
-                (call_id,)
+                "SELECT call_id, slack_posted FROM processed_calls WHERE call_id = ? AND slack_posted = 1 AND processed_at > ?",
+                (call_id, one_hour_ago)
             ).fetchone()
-            return result is not None
+            if result:
+                logger.info(f"✅ Call {call_id} already successfully posted to Slack in the last hour")
+                return True
+            return False
     
     def mark_call_processing(self, call_id: str, call_data: Dict[str, Any]) -> bool:
         """Mark call as being processed (prevents race condition)
         Returns True if successfully marked, False if already exists
-        BULLETPROOF: No call will ever be processed twice
+        BULLETPROOF: No call will ever be processed twice in the last hour
         """
         with self._get_connection() as conn:
-            # Check if call already exists (any status)
+            # Only check for duplicates in the last hour
+            one_hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+            
+            # Check if call already exists and is being processed or completed in the last hour
             existing = conn.execute(
-                "SELECT call_id, slack_posted, status FROM processed_calls WHERE call_id = ?",
-                (call_id,)
+                "SELECT call_id, slack_posted, status, processed_at FROM processed_calls WHERE call_id = ? AND processed_at > ?",
+                (call_id, one_hour_ago)
             ).fetchone()
             
             if existing:
                 call_status = existing[2] if existing[2] else 'unknown'
                 slack_posted = existing[1] if existing[1] else False
+                processed_at = existing[3] if existing[3] else 'unknown'
                 
-                logger.warning(f"🚫 CALL ALREADY EXISTS: {call_id}")
-                logger.warning(f"   Status: {call_status}")
-                logger.warning(f"   Slack Posted: {slack_posted}")
-                logger.warning(f"   BLOCKING DUPLICATE PROCESSING")
-                return False
+                # Only block if call is currently being processed or already posted to Slack in the last hour
+                if call_status == 'processing' or slack_posted:
+                    logger.warning(f"🚫 RECENT DUPLICATE CALL: {call_id}")
+                    logger.warning(f"   Status: {call_status}")
+                    logger.warning(f"   Slack Posted: {slack_posted}")
+                    logger.warning(f"   Processed At: {processed_at}")
+                    logger.warning(f"   BLOCKING: Call processed in last hour")
+                    return False
+                else:
+                    # Call exists but failed in last hour - allow retry
+                    logger.info(f"🔄 RETRYING RECENT FAILED CALL: {call_id}")
+                    logger.info(f"   Previous Status: {call_status}")
+                    logger.info(f"   Previous Slack Posted: {slack_posted}")
+                    logger.info(f"   Previous Processed At: {processed_at}")
+                    # Update the existing record to processing
+                    conn.execute("""
+                        UPDATE processed_calls 
+                        SET status = 'processing', processed_at = ?, transcription_text = 'Processing...'
+                        WHERE call_id = ? AND processed_at > ?
+                    """, (datetime.utcnow().isoformat(), call_id, one_hour_ago))
+                    conn.commit()
+                    logger.info(f"🔄 RETRY LOCK: Marked call {call_id} as processing (retry)")
+                    return True
             
             # Insert new call as processing with BULLETPROOF locking
             conn.execute("""
@@ -1089,7 +1116,7 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
         
         # BULLETPROOF DUPLICATE PREVENTION - Layer 3: Final safety check before Slack post
         if db_manager.is_call_processed(call_id):
-            logger.warning(f"🚫 FINAL SAFETY CHECK: Call {call_id} already processed - SKIPPING SLACK POST")
+            logger.warning(f"🚫 FINAL SAFETY CHECK: Call {call_id} already posted to Slack in last hour - SKIPPING DUPLICATE POST")
             db_manager.mark_call_processed(call_data, transcription, True)  # Mark as processed without posting
             return
         
@@ -1197,15 +1224,15 @@ async def zapier_webhook(
         logger.info(f"   From: {payload.from_number}")
         logger.info(f"   To: {payload.to_number}")
         
-        # BULLETPROOF DUPLICATE PREVENTION - Layer 1: Quick existence check
+        # BULLETPROOF DUPLICATE PREVENTION - Layer 1: Quick existence check (last hour only)
         if db_manager.is_call_processed(call_id):
-            logger.warning(f"🚫 DUPLICATE CALL DETECTED (Layer 1): {call_id}")
+            logger.warning(f"🚫 RECENT DUPLICATE CALL DETECTED (Layer 1): {call_id}")
             logger.warning(f"   From: {payload.from_number}")
             logger.warning(f"   To: {payload.to_number}")
-            logger.warning(f"   BLOCKING: Call already exists in database")
+            logger.warning(f"   BLOCKING: Call already processed in last hour")
             return WebhookResponse(
                 success=True,
-                message="Duplicate call - already processed (layer 1)",
+                message="Duplicate call - already processed in last hour (layer 1)",
                 call_id=call_id,
                 timestamp=datetime.utcnow().isoformat() + "Z"
             )
@@ -1263,15 +1290,15 @@ async def zapier_webhook(
             'customer_segment': payload.customer_segment
         }
         
-        # BULLETPROOF DUPLICATE PREVENTION - Layer 2: Database lock check
+        # BULLETPROOF DUPLICATE PREVENTION - Layer 2: Database lock check (last hour only)
         if not db_manager.mark_call_processing(call_id, call_data):
-            logger.warning(f"🚫 DUPLICATE CALL DETECTED (Layer 2): {call_id}")
+            logger.warning(f"🚫 RECENT DUPLICATE CALL DETECTED (Layer 2): {call_id}")
             logger.warning(f"   From: {payload.from_number}")
             logger.warning(f"   To: {payload.to_number}")
-            logger.warning(f"   BLOCKING: Call already exists in database (race condition prevented)")
+            logger.warning(f"   BLOCKING: Call already processed in last hour (race condition prevented)")
             return WebhookResponse(
                 success=True,
-                message="Duplicate call - already processed (layer 2)",
+                message="Duplicate call - already processed in last hour (layer 2)",
                 call_id=call_id,
                 timestamp=datetime.utcnow().isoformat() + "Z"
             )
