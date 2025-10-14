@@ -1050,7 +1050,31 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
         recording_url = call_data.get('recording_url')
         if not recording_url:
             logger.warning(f"No recording URL for call {call_id}")
-            db_manager.mark_call_processed(call_data, "No recording available", False)
+            # Still post to Slack even without recording - just with a note
+            logger.info(f"Posting call {call_id} to Slack without recording")
+            
+            # Generate a simple MOM without transcription
+            simple_mom = f"""**Call Summary:**
+Call from {call_data['from_number']} to {call_data['to_number']}
+Duration: {call_data['duration']} seconds
+Date: {call_data.get('timestamp', 'Unknown')}
+
+**Note:** No recording available for transcription.
+
+**Action Required:**
+• Review call details manually
+• Follow up with customer if needed
+• Update ticket with call information"""
+            
+            # Format and post to Slack
+            slack_message_data = SlackFormatter.format_message(call_data, simple_mom, "")
+            success = SlackFormatter.post_to_slack(
+                message_data=slack_message_data,
+                webhook_url=SLACK_WEBHOOK_URL
+            )
+            
+            # Mark as processed
+            db_manager.mark_call_processed(call_data, "No recording available", success)
             return
         
         # Download recording
@@ -1247,7 +1271,11 @@ async def zapier_webhook(
         
         # Try to mark as processing - if it returns False, call already exists
         if not db_manager.mark_call_processing(call_id, call_data):
-            logger.info(f"Duplicate call detected: {call_id}")
+            logger.warning(f"🚫 DUPLICATE CALL DETECTED: {call_id}")
+            logger.warning(f"   From: {payload.from_number}")
+            logger.warning(f"   To: {payload.to_number}")
+            logger.warning(f"   Duration: {payload.duration}s")
+            logger.warning(f"   This call has already been processed - skipping")
             return WebhookResponse(
                 success=True,
                 message="Duplicate call - already processed",
