@@ -153,12 +153,7 @@ class DatabaseManager:
                 "SELECT call_id FROM processed_calls WHERE call_id = ?",
                 (call_id,)
             ).fetchone()
-            is_processed = result is not None
-            if is_processed:
-                logger.info(f"🔍 Call {call_id} already processed - skipping duplicate")
-            else:
-                logger.info(f"🆕 Call {call_id} not found in database - processing")
-            return is_processed
+            return result is not None
     
     def mark_call_processing(self, call_id: str, call_data: Dict[str, Any]) -> bool:
         """Mark call as being processed (prevents race condition)
@@ -476,7 +471,7 @@ Create the MOM in a clear, professional format with actual conversation content.
         fallback_mom = f"""**Tone:** Normal
 **Mood Analysis:** Neutral
 **Concern Type:** Miscellaneous
-**Issue Type:** Case Status Update
+**Issue Type:** Miscellaneous
 
 **Call Summary:**
 The call was regarding a customer support inquiry. The conversation lasted {len(transcription)} characters.
@@ -971,7 +966,7 @@ class SlackFormatter:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 👤 *Customer:* {customer_legal_name}
-📱 *Customer Number:* `{customer_number}`
+📞 *Support Number:* `{support_number}`
 
 👔 *Agent:* {agent_name} {agent_mention}
 🏢 *Department:* {department}
@@ -1057,31 +1052,7 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
         recording_url = call_data.get('recording_url')
         if not recording_url:
             logger.warning(f"No recording URL for call {call_id}")
-            # Still post to Slack even without recording - just with a note
-            logger.info(f"Posting call {call_id} to Slack without recording")
-            
-            # Generate a simple MOM without transcription
-            simple_mom = f"""**Call Summary:**
-Call from {call_data['from_number']} to {call_data['to_number']}
-Duration: {call_data['duration']} seconds
-Date: {call_data.get('timestamp', 'Unknown')}
-
-**Note:** No recording available for transcription.
-
-**Action Required:**
-• Review call details manually
-• Follow up with customer if needed
-• Update ticket with call information"""
-            
-            # Format and post to Slack
-            slack_message_data = SlackFormatter.format_message(call_data, simple_mom, "")
-            success = SlackFormatter.post_to_slack(
-                message_data=slack_message_data,
-                webhook_url=SLACK_WEBHOOK_URL
-            )
-            
-            # Mark as processed
-            db_manager.mark_call_processed(call_data, "No recording available", success)
+            db_manager.mark_call_processed(call_data, "No recording available", False)
             return
         
         # Download recording
@@ -1116,7 +1087,7 @@ Date: {call_data.get('timestamp', 'Unknown')}
             logger.warning("MOM generator not available, using transcription")
             mom = transcription
         
-        # FINAL SAFETY CHECK: Ensure call hasn't been posted to Slack already
+        # BULLETPROOF DUPLICATE PREVENTION - Layer 3: Final safety check before Slack post
         if db_manager.is_call_processed(call_id):
             logger.warning(f"🚫 FINAL SAFETY CHECK: Call {call_id} already processed - SKIPPING SLACK POST")
             db_manager.mark_call_processed(call_data, transcription, True)  # Mark as processed without posting
@@ -1225,9 +1196,19 @@ async def zapier_webhook(
         logger.info(f"📞 Received webhook for call {call_id}")
         logger.info(f"   From: {payload.from_number}")
         logger.info(f"   To: {payload.to_number}")
-        logger.info(f"   Duration: {payload.duration}s")
-        logger.info(f"   Recording URL: {payload.recording_url}")
         
+        # BULLETPROOF DUPLICATE PREVENTION - Layer 1: Quick existence check
+        if db_manager.is_call_processed(call_id):
+            logger.warning(f"🚫 DUPLICATE CALL DETECTED (Layer 1): {call_id}")
+            logger.warning(f"   From: {payload.from_number}")
+            logger.warning(f"   To: {payload.to_number}")
+            logger.warning(f"   BLOCKING: Call already exists in database")
+            return WebhookResponse(
+                success=True,
+                message="Duplicate call - already processed (layer 1)",
+                call_id=call_id,
+                timestamp=datetime.utcnow().isoformat() + "Z"
+            )
         
         if not SLACK_WEBHOOK_URL:
             raise HTTPException(status_code=500, detail="Slack webhook not configured")
@@ -1282,31 +1263,15 @@ async def zapier_webhook(
             'customer_segment': payload.customer_segment
         }
         
-        # BULLETPROOF DUPLICATE PREVENTION - Check multiple times
-        # First check: Quick existence check
-        if db_manager.is_call_processed(call_id):
-            logger.warning(f"🚫 DUPLICATE CALL DETECTED (Quick Check): {call_id}")
-            logger.warning(f"   From: {payload.from_number}")
-            logger.warning(f"   To: {payload.to_number}")
-            logger.warning(f"   Duration: {payload.duration}s")
-            logger.warning(f"   BLOCKING: Call already exists in database")
-            return WebhookResponse(
-                success=True,
-                message="Duplicate call - already processed (quick check)",
-                call_id=call_id,
-                timestamp=datetime.utcnow().isoformat() + "Z"
-            )
-        
-        # Second check: Try to mark as processing - if it returns False, call already exists
+        # BULLETPROOF DUPLICATE PREVENTION - Layer 2: Database lock check
         if not db_manager.mark_call_processing(call_id, call_data):
-            logger.warning(f"🚫 DUPLICATE CALL DETECTED (Lock Check): {call_id}")
+            logger.warning(f"🚫 DUPLICATE CALL DETECTED (Layer 2): {call_id}")
             logger.warning(f"   From: {payload.from_number}")
             logger.warning(f"   To: {payload.to_number}")
-            logger.warning(f"   Duration: {payload.duration}s")
             logger.warning(f"   BLOCKING: Call already exists in database (race condition prevented)")
             return WebhookResponse(
                 success=True,
-                message="Duplicate call - already processed (lock check)",
+                message="Duplicate call - already processed (layer 2)",
                 call_id=call_id,
                 timestamp=datetime.utcnow().isoformat() + "Z"
             )
@@ -1336,34 +1301,8 @@ async def get_stats():
     return {
         "stats": stats,
         "agents_loaded": len(AGENT_MAPPING),
-        "database_path": DATABASE_PATH,
         "timestamp": datetime.utcnow().isoformat() + "Z"
     }
-
-@app.get("/calls")
-async def get_recent_calls():
-    """Get recent processed calls for debugging"""
-    with db_manager._get_connection() as conn:
-        results = conn.execute(
-            "SELECT call_id, from_number, to_number, processed_at, slack_posted, status FROM processed_calls ORDER BY processed_at DESC LIMIT 10"
-        ).fetchall()
-        
-        calls = []
-        for row in results:
-            calls.append({
-                "call_id": row[0],
-                "from_number": row[1],
-                "to_number": row[2],
-                "processed_at": row[3],
-                "slack_posted": bool(row[4]),
-                "status": row[5]
-            })
-        
-        return {
-            "recent_calls": calls,
-            "total_calls": len(calls),
-            "database_path": DATABASE_PATH
-        }
 
 
 @app.get("/call/{call_id}")
