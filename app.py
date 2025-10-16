@@ -1276,7 +1276,7 @@ async def zapier_webhook(
         
         # DATE VALIDATION: Reject old/future calls
         try:
-            call_date_str = payload.date_created
+            call_date_str = payload.timestamp
             if call_date_str:
                 # Parse the call date
                 call_date = datetime.fromisoformat(call_date_str.replace('Z', '+00:00'))
@@ -1313,7 +1313,7 @@ async def zapier_webhook(
                     logger.info(f"✅ Call date validated: {call_date_str} ({days_diff} days old)")
         except Exception as e:
             logger.warning(f"⚠️ Could not validate call date: {e}")
-            logger.warning(f"   Call Date: {payload.date_created}")
+            logger.warning(f"   Call Date: {payload.timestamp}")
             # Continue processing if date validation fails
         
         if not SLACK_WEBHOOK_URL:
