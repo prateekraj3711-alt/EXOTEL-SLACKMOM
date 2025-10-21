@@ -1274,7 +1274,7 @@ async def zapier_webhook(
                 timestamp=datetime.utcnow().isoformat() + "Z"
             )
         
-        # DATE VALIDATION: Reject old/future calls
+        # DATE VALIDATION: Only process calls from today (same date)
         try:
             call_date_str = payload.timestamp
             if call_date_str:
@@ -1282,35 +1282,39 @@ async def zapier_webhook(
                 call_date = datetime.fromisoformat(call_date_str.replace('Z', '+00:00'))
                 current_date = datetime.utcnow()
                 
-                # Calculate time difference
-                time_diff = current_date - call_date.replace(tzinfo=None)
-                days_diff = time_diff.days
+                # Get dates without time component for comparison
+                call_date_only = call_date.replace(tzinfo=None).date()
+                current_date_only = current_date.date()
                 
-                # Reject calls older than 1 day or future calls
-                if days_diff > 1:
+                # Only accept calls from today
+                if call_date_only < current_date_only:
+                    days_old = (current_date_only - call_date_only).days
                     logger.warning(f"🚫 OLD CALL REJECTED: {call_id}")
-                    logger.warning(f"   Call Date: {call_date_str}")
-                    logger.warning(f"   Days Old: {days_diff}")
-                    logger.warning(f"   BLOCKING: Call is older than 1 day (Zapier polling old data)")
+                    logger.warning(f"   Call Date: {call_date_str} ({call_date_only})")
+                    logger.warning(f"   Current Date: {current_date_only}")
+                    logger.warning(f"   Days Old: {days_old}")
+                    logger.warning(f"   BLOCKING: Call is from a previous day (Zapier polling old data)")
                     return WebhookResponse(
                         success=True,
-                        message=f"Call rejected - too old ({days_diff} days)",
+                        message=f"Call rejected - from previous day ({days_old} days old)",
                         call_id=call_id,
                         timestamp=datetime.utcnow().isoformat() + "Z"
                     )
-                elif days_diff < -1:  # Future calls (more than 1 day ahead)
+                elif call_date_only > current_date_only:
+                    days_ahead = (call_date_only - current_date_only).days
                     logger.warning(f"🚫 FUTURE CALL REJECTED: {call_id}")
-                    logger.warning(f"   Call Date: {call_date_str}")
-                    logger.warning(f"   Days Ahead: {abs(days_diff)}")
-                    logger.warning(f"   BLOCKING: Call is in the future")
+                    logger.warning(f"   Call Date: {call_date_str} ({call_date_only})")
+                    logger.warning(f"   Current Date: {current_date_only}")
+                    logger.warning(f"   Days Ahead: {days_ahead}")
+                    logger.warning(f"   BLOCKING: Call is from a future date")
                     return WebhookResponse(
                         success=True,
-                        message=f"Call rejected - future date ({abs(days_diff)} days ahead)",
+                        message=f"Call rejected - future date ({days_ahead} days ahead)",
                         call_id=call_id,
                         timestamp=datetime.utcnow().isoformat() + "Z"
                     )
                 else:
-                    logger.info(f"✅ Call date validated: {call_date_str} ({days_diff} days old)")
+                    logger.info(f"✅ Call date validated: {call_date_str} (today: {current_date_only})")
         except Exception as e:
             logger.warning(f"⚠️ Could not validate call date: {e}")
             logger.warning(f"   Call Date: {payload.timestamp}")
