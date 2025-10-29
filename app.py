@@ -1286,47 +1286,55 @@ async def zapier_webhook(
         try:
             call_date_str = payload.timestamp
             if call_date_str:
-                # Parse the call date
-                call_date = datetime.fromisoformat(call_date_str.replace('Z', '+00:00'))
+                # Parse the call timestamp
+                # Handle both ISO format with Z and without timezone info
+                if 'Z' in call_date_str or '+' in call_date_str or call_date_str.count(':') == 3:
+                    # Has timezone info
+                    call_date = datetime.fromisoformat(call_date_str.replace('Z', '+00:00'))
+                    call_time = call_date.replace(tzinfo=None)
+                else:
+                    # No timezone - assume it's already in UTC or local time
+                    call_time = datetime.fromisoformat(call_date_str)
+                
                 current_time = datetime.utcnow()
                 
-                # Remove timezone info for comparison
-                call_time = call_date.replace(tzinfo=None)
-                
-                # Calculate time difference
+                # Calculate time difference (absolute value to handle both past and future)
                 time_difference = current_time - call_time
-                hours_old = time_difference.total_seconds() / 3600
-                minutes_old = time_difference.total_seconds() / 60
+                time_difference_abs = abs(time_difference.total_seconds())
+                hours_diff = time_difference_abs / 3600
+                minutes_diff = time_difference_abs / 60
                 
-                # Only accept calls from last 1 hour
-                if hours_old > 1:
-                    logger.warning(f"🚫 OLD CALL REJECTED: {call_id}")
-                    logger.warning(f"   Call Time: {call_date_str}")
-                    logger.warning(f"   Current Time: {current_time.isoformat()}")
-                    logger.warning(f"   Age: {minutes_old:.1f} minutes ({hours_old:.2f} hours)")
-                    logger.warning(f"   BLOCKING: Call is older than 1 hour (Zapier polling old data)")
-                    return WebhookResponse(
-                        success=True,
-                        message=f"Call rejected - older than 1 hour ({minutes_old:.1f} minutes old)",
-                        call_id=call_id,
-                        timestamp=datetime.utcnow().isoformat() + "Z"
-                    )
-                elif time_difference.total_seconds() < 0:
-                    # Future call (clock skew or wrong timezone)
-                    minutes_ahead = abs(time_difference.total_seconds() / 60)
-                    logger.warning(f"🚫 FUTURE CALL REJECTED: {call_id}")
-                    logger.warning(f"   Call Time: {call_date_str}")
-                    logger.warning(f"   Current Time: {current_time.isoformat()}")
-                    logger.warning(f"   Time Ahead: {minutes_ahead:.1f} minutes")
-                    logger.warning(f"   BLOCKING: Call timestamp is in the future")
-                    return WebhookResponse(
-                        success=True,
-                        message=f"Call rejected - future timestamp ({minutes_ahead:.1f} minutes ahead)",
-                        call_id=call_id,
-                        timestamp=datetime.utcnow().isoformat() + "Z"
-                    )
+                # More lenient: Accept calls within ±6 hours (handles timezone issues)
+                # This allows for IST (+5:30), other timezones, and still filters old calls
+                if hours_diff > 6:
+                    if time_difference.total_seconds() > 0:
+                        # Old call
+                        logger.warning(f"🚫 OLD CALL REJECTED: {call_id}")
+                        logger.warning(f"   Call Time: {call_date_str}")
+                        logger.warning(f"   Current Time: {current_time.isoformat()}")
+                        logger.warning(f"   Age: {minutes_diff:.1f} minutes ({hours_diff:.2f} hours)")
+                        logger.warning(f"   BLOCKING: Call is older than 6 hours")
+                        return WebhookResponse(
+                            success=True,
+                            message=f"Call rejected - older than 6 hours ({hours_diff:.2f} hours old)",
+                            call_id=call_id,
+                            timestamp=datetime.utcnow().isoformat() + "Z"
+                        )
+                    else:
+                        # Future call (very wrong)
+                        logger.warning(f"🚫 FUTURE CALL REJECTED: {call_id}")
+                        logger.warning(f"   Call Time: {call_date_str}")
+                        logger.warning(f"   Current Time: {current_time.isoformat()}")
+                        logger.warning(f"   Time Ahead: {minutes_diff:.1f} minutes ({hours_diff:.2f} hours)")
+                        logger.warning(f"   BLOCKING: Call timestamp is too far in future")
+                        return WebhookResponse(
+                            success=True,
+                            message=f"Call rejected - timestamp too far in future ({hours_diff:.2f} hours)",
+                            call_id=call_id,
+                            timestamp=datetime.utcnow().isoformat() + "Z"
+                        )
                 else:
-                    logger.info(f"✅ Call time validated: {call_date_str} ({minutes_old:.1f} minutes ago)")
+                    logger.info(f"✅ Call time validated: {call_date_str} (within 6-hour window)")
         except Exception as e:
             logger.warning(f"⚠️ Could not validate call timestamp: {e}")
             logger.warning(f"   Call Timestamp: {payload.timestamp}")
