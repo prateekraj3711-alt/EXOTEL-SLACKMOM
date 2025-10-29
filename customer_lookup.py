@@ -78,8 +78,10 @@ class CustomerLookup:
             for record in records:
                 ca_mobile = str(record.get('CA Mobile', '')).strip()
                 if ca_mobile:
-                    clean_number = self.normalize_phone(ca_mobile)
-                    self.cache[clean_number] = {
+                    # CA Mobile can have multiple numbers separated by commas
+                    phone_numbers = [p.strip() for p in ca_mobile.split(',')]
+                    
+                    customer_details = {
                         'company_id': str(record.get('Company ID', '')),
                         'company_name': str(record.get('Company Name', '')),
                         'company_status': str(record.get('Company Status', '')),
@@ -88,9 +90,15 @@ class CustomerLookup:
                         'ca_mobile': ca_mobile,
                         'original_phone': ca_mobile
                     }
+                    
+                    # Add each phone number to cache
+                    for phone in phone_numbers:
+                        if phone:  # Skip empty strings
+                            clean_number = self.normalize_phone(phone)
+                            self.cache[clean_number] = customer_details
             
             self.cache_loaded = True
-            logger.info(f"✅ Loaded {len(self.cache)} customer records from Google Sheets")
+            logger.info(f"✅ Loaded {len(self.cache)} phone number mappings from Google Sheets")
             return True
             
         except Exception as e:
