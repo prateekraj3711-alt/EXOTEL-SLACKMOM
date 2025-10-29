@@ -22,9 +22,6 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
-# Import customer lookup module
-from customer_lookup import CustomerLookup
-
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -392,9 +389,9 @@ class MOMGenerator:
                 
                 logger.info(f"Generating MOM from transcription (attempt {attempt + 1}/{max_retries})...")
                 
-                prompt = f"""You are an expert at creating comprehensive Meeting Minutes (MOM) for customer support calls, especially for longer calls (5-10 minutes).
+                prompt = f"""You are an expert at creating concise Meeting Minutes (MOM) for customer support calls.
 
-Analyze this call transcription and create a detailed, structured MOM with these sections:
+Analyze this call transcription and create a structured MOM with these sections:
 
 **Tone:** [REQUIRED - Choose ONE: "Normal" or "Escalation"]
 Determine if the call is an escalation (customer is frustrated/angry/upset/demanding manager) or normal (regular inquiry/polite conversation).
@@ -409,43 +406,36 @@ Categorize the main concern or issue type discussed. Can be multiple types separ
 Categorize the main topics discussed. Can be multiple types separated by commas.
 
 **Customer Issue:**
-[Provide a DETAILED summary of the main problem/concern the customer is reporting - minimum 2-3 sentences with full context]
-[Include specific details mentioned: IDs, names, dates, amounts, etc.]
-[Example: "Customer seeking clarification on the proactive email sent for candidate ID 263223 verification. Customer wants to know when the math unit starts and how long it takes to complete."]
+[Summarize the main problem/concern the customer is reporting - minimum 1 line]
 
 **Key Discussion Points:**
-[CRITICAL: Extract 5-8 ACTUAL DIRECT QUOTES from the conversation - DO NOT PARAPHRASE OR SUMMARIZE]
+[CRITICAL: Extract 5-8 ACTUAL DIRECT QUOTES with CLEAR SPEAKER LABELS]
+[MANDATORY FORMAT: Each point MUST start with "Customer (Name):" or "Agent (Name):" followed by the actual quote in quotation marks]
 [Use the EXACT WORDS spoken in the conversation]
-[For 8-minute calls, include substantial verbatim content from the actual conversation]
-[Format: Start each point with "- " and use quotation marks for direct quotes]
-[WRONG EXAMPLE (paraphrased): "- Divya from Spring Verifier identified the reason for the customer's call, referencing a missed call from the customer and inquiring about any queries."]
-[CORRECT EXAMPLE (actual quote): "- Divya: 'We have just initiated a mail that we have initiated a profile for verification of this candidate. Do you have his ID?' Customer responded with ID 263223."]
-[CORRECT EXAMPLE: "- Customer mentioned interacting with lawyer Utsav Kush who had promised to get back to them. Customer clarified they had already been in touch with Supriya."]
-[CORRECT EXAMPLE: "- Divya asked if the customer's query had been resolved. Customer responded that they still needed to get in touch with Supriya."]
-[Include 5-8 actual conversation points with direct quotes for longer calls]
-[NEVER paraphrase - always use actual words from the transcript]
+[CORRECT FORMAT EXAMPLES:]
+[- Customer (Chhaya): "We put some requests, like BGV requests. We need a report, actually."]
+[- Agent (Rahul): "I can send it to you right now. Or all the candidates who have completed?"]
+[- Customer (Chhaya): "You have added 11 candidates, out of which I think nine of them are complete."]
+[- Agent (Rahul): "I will send it to you, and I will mark these remaining people in the CC, all right?"]
+[WRONG FORMAT: "Customer mentioned needing help" - MISSING name and not a direct quote]
+[WRONG FORMAT: "- The agent said..." - MUST use format "Agent (Name): quote"]
+[ALWAYS include both role (Customer/Agent) AND the person's actual name in parentheses]
+[List 5-8 actual discussion points with clear speaker attribution for longer calls]
 
 **Action Items:**
-[List specific, actionable next steps with details]
-[Include who needs to do what, and any deadlines or IDs mentioned]
-[Example: "- Verify the candidate's ID 263223 for profile verification"]
-[Example: "- Provide information on the duration for completing the math unit"]
+[List specific actions needed to resolve this issue - each action on a new line]
 
 **Resolution Status:**
-[Provide detailed resolution status: "Resolved" / "Pending" / "Escalated"]
-[Include what was resolved and what remains pending]
+[State if issue was resolved or pending]
 
 CRITICAL REQUIREMENTS: 
-- For longer calls (5+ minutes), the MOM must extract SUBSTANTIAL CONTENT (minimum 5-8 key discussion points with full context)
-- Each "Key Discussion Point" MUST use DIRECT QUOTES from the actual conversation - NO PARAPHRASING
-- Use quotation marks around the actual words spoken in the conversation
-- Include ACTUAL DETAILS from the conversation: IDs, names, specific questions asked, specific answers given
-- DO NOT summarize or paraphrase - use the EXACT WORDS from the transcript
-- For "Key Discussion Points" - QUOTE the actual conversation verbatim, do not rewrite in your own words
-- Each section should contain actual quotes and specific facts from the transcript
+- The MOM must have AT LEAST 3 substantial lines of content
+- For "Key Discussion Points" - USE ACTUAL WORDS from the conversation, NOT rephrased summaries
+- Include direct quotes or verbatim statements whenever possible
+- Each section should be detailed and informative
+- Include specific details from the transcription
 - MUST include Tone, Mood Analysis, and Concern Type at the beginning
 - Mood Analysis is MANDATORY for customer satisfaction tracking
-- ABSOLUTELY NO PARAPHRASING - use actual conversation content only
 
 FORMAT:
 **Tone:** [Normal/Escalation]
@@ -454,36 +444,36 @@ FORMAT:
 **Issue Type:** [One or more categories]
 
 **Customer Issue:**
-[Detailed summary with full context - 2-3 sentences]
+[Summary]
 
 **Key Discussion Points:**
-[5-8 detailed points with full context for longer calls]
+[Actual quotes]
 
 **Action Items:**
-[Specific actionable items with details]
+[Actions]
 
 **Resolution Status:**
-[Detailed status]
+[Status]
 
 Transcription:
 {transcription}
 
-Create a comprehensive MOM with full context and actual details from the conversation. For an 8-minute call, include substantial content across all sections."""
+Create the MOM in a clear, professional format with actual conversation content."""
 
                 payload = {
                     "model": "gpt-3.5-turbo",
                     "messages": [
                         {
                             "role": "system",
-                            "content": "You are a professional customer support analyst who creates detailed meeting minutes using ACTUAL DIRECT QUOTES from conversations - NEVER paraphrase or summarize. ALWAYS include Tone, Mood Analysis, and Concern Type fields. For Key Discussion Points, you MUST use the EXACT WORDS spoken in the conversation with quotation marks. DO NOT rewrite or paraphrase - extract verbatim quotes from the transcript. For longer calls (5-10 minutes), extract 5-8 direct quotes from the actual conversation including specific IDs, names, questions, and answers."
+                            "content": "You are a professional customer support analyst who creates detailed meeting minutes. CRITICAL: In Key Discussion Points, EVERY quote MUST start with either 'Customer (Name):' or 'Agent (Name):' format. Example: '- Customer (Chhaya): \"We need a report\"' or '- Agent (Rahul): \"I will send it\"'. Never use generic labels. Always identify the specific person speaking. ALWAYS include Tone, Mood Analysis, and Concern Type fields."
                         },
                         {
                             "role": "user",
                             "content": prompt
                         }
                     ],
-                    "temperature": 0.1,
-                    "max_tokens": 1500
+                    "temperature": 0.3,
+                    "max_tokens": 800
                 }
                 
                 response = requests.post(
@@ -1011,26 +1001,8 @@ class SlackFormatter:
         duration_sec = call_data.get('duration', 0)
         duration_formatted = f"{duration_sec}s ({int(duration_sec // 60)}m {duration_sec % 60}s)"
         
-        # Lookup customer details from Google Sheets
-        customer_details = customer_lookup.lookup_customer(customer_number)
-        
-        # Format customer display name with company and CA name if available
-        if customer_details:
-            company_name = customer_details.get('company_name', 'Unavailable')
-            ca_name = customer_details.get('ca_name', '')
-            ca_email = customer_details.get('ca_email', '')
-            
-            # Show company name only (no "Customer" prefix)
-            if ca_name:
-                customer_legal_name = f"{company_name} ({ca_name})"
-            else:
-                customer_legal_name = company_name
-            
-            customer_contact_info = f"\n📧 *CA Email:* {ca_email}" if ca_email else ""
-        else:
-            # If not found in Google Sheet, show "Unavailable"
-            customer_legal_name = "Unavailable"
-            customer_contact_info = ""
+        # Customer Legal Name (use phone number for now, can be enhanced with Google Sheets lookup)
+        customer_legal_name = f"Customer {customer_number}"
         
         # Build Exotel recording link
         exotel_link = call_data.get('recording_url', 'N/A')
@@ -1042,8 +1014,7 @@ class SlackFormatter:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-👤 *Customer:* {customer_legal_name}{customer_contact_info}
-📞 *Customer Number:* `{customer_number}`
+👤 *Customer:* {customer_legal_name}
 📞 *Support Number:* `{support_number}`
 
 👔 *Agent:* {agent_name} {agent_mention}
@@ -1114,7 +1085,6 @@ class SlackFormatter:
 transcription_service = TranscriptionService(OPENAI_API_KEY) if OPENAI_API_KEY else None
 mom_generator = MOMGenerator(OPENAI_API_KEY) if OPENAI_API_KEY else None
 google_drive_service = GoogleDriveService(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET) if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET else None
-customer_lookup = CustomerLookup()
 
 def emergency_cleanup_old_records():
     """Emergency cleanup of old records that might cause duplicate posts"""
@@ -1312,51 +1282,55 @@ async def zapier_webhook(
                 timestamp=datetime.utcnow().isoformat() + "Z"
             )
         
-        # DATE VALIDATION: Only process calls from today (same date)
+        # TIME VALIDATION: Only process calls from last 1 hour (prevents duplicates from Zapier polling)
         try:
             call_date_str = payload.timestamp
             if call_date_str:
                 # Parse the call date
                 call_date = datetime.fromisoformat(call_date_str.replace('Z', '+00:00'))
-                current_date = datetime.utcnow()
+                current_time = datetime.utcnow()
                 
-                # Get dates without time component for comparison
-                call_date_only = call_date.replace(tzinfo=None).date()
-                current_date_only = current_date.date()
+                # Remove timezone info for comparison
+                call_time = call_date.replace(tzinfo=None)
                 
-                # Only accept calls from today
-                if call_date_only < current_date_only:
-                    days_old = (current_date_only - call_date_only).days
+                # Calculate time difference
+                time_difference = current_time - call_time
+                hours_old = time_difference.total_seconds() / 3600
+                minutes_old = time_difference.total_seconds() / 60
+                
+                # Only accept calls from last 1 hour
+                if hours_old > 1:
                     logger.warning(f"🚫 OLD CALL REJECTED: {call_id}")
-                    logger.warning(f"   Call Date: {call_date_str} ({call_date_only})")
-                    logger.warning(f"   Current Date: {current_date_only}")
-                    logger.warning(f"   Days Old: {days_old}")
-                    logger.warning(f"   BLOCKING: Call is from a previous day (Zapier polling old data)")
+                    logger.warning(f"   Call Time: {call_date_str}")
+                    logger.warning(f"   Current Time: {current_time.isoformat()}")
+                    logger.warning(f"   Age: {minutes_old:.1f} minutes ({hours_old:.2f} hours)")
+                    logger.warning(f"   BLOCKING: Call is older than 1 hour (Zapier polling old data)")
                     return WebhookResponse(
                         success=True,
-                        message=f"Call rejected - from previous day ({days_old} days old)",
+                        message=f"Call rejected - older than 1 hour ({minutes_old:.1f} minutes old)",
                         call_id=call_id,
                         timestamp=datetime.utcnow().isoformat() + "Z"
                     )
-                elif call_date_only > current_date_only:
-                    days_ahead = (call_date_only - current_date_only).days
+                elif time_difference.total_seconds() < 0:
+                    # Future call (clock skew or wrong timezone)
+                    minutes_ahead = abs(time_difference.total_seconds() / 60)
                     logger.warning(f"🚫 FUTURE CALL REJECTED: {call_id}")
-                    logger.warning(f"   Call Date: {call_date_str} ({call_date_only})")
-                    logger.warning(f"   Current Date: {current_date_only}")
-                    logger.warning(f"   Days Ahead: {days_ahead}")
-                    logger.warning(f"   BLOCKING: Call is from a future date")
+                    logger.warning(f"   Call Time: {call_date_str}")
+                    logger.warning(f"   Current Time: {current_time.isoformat()}")
+                    logger.warning(f"   Time Ahead: {minutes_ahead:.1f} minutes")
+                    logger.warning(f"   BLOCKING: Call timestamp is in the future")
                     return WebhookResponse(
                         success=True,
-                        message=f"Call rejected - future date ({days_ahead} days ahead)",
+                        message=f"Call rejected - future timestamp ({minutes_ahead:.1f} minutes ahead)",
                         call_id=call_id,
                         timestamp=datetime.utcnow().isoformat() + "Z"
                     )
                 else:
-                    logger.info(f"✅ Call date validated: {call_date_str} (today: {current_date_only})")
+                    logger.info(f"✅ Call time validated: {call_date_str} ({minutes_old:.1f} minutes ago)")
         except Exception as e:
-            logger.warning(f"⚠️ Could not validate call date: {e}")
-            logger.warning(f"   Call Date: {payload.timestamp}")
-            # Continue processing if date validation fails
+            logger.warning(f"⚠️ Could not validate call timestamp: {e}")
+            logger.warning(f"   Call Timestamp: {payload.timestamp}")
+            # Continue processing if time validation fails
         
         if not SLACK_WEBHOOK_URL:
             raise HTTPException(status_code=500, detail="Slack webhook not configured")
