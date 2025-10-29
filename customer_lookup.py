@@ -205,9 +205,9 @@ class CustomerLookup:
             Formatted string for display
         """
         if not customer_details:
-            return "Unavailable"
+            return "Name not found"
         
-        company_name = customer_details.get('company_name', 'Unavailable')
+        company_name = customer_details.get('company_name', 'Name not found')
         ca_name = customer_details.get('ca_name', '')
         
         if ca_name:
@@ -227,14 +227,14 @@ class CustomerLookup:
         """
         if not customer_details:
             return {
-                'company_name': 'Unavailable',
+                'company_name': 'Name not found',
                 'ca_name': '',
                 'ca_email': '',
                 'ca_mobile': ''
             }
         
         return {
-            'company_name': customer_details.get('company_name', 'Unavailable'),
+            'company_name': customer_details.get('company_name', 'Name not found'),
             'ca_name': customer_details.get('ca_name', ''),
             'ca_email': customer_details.get('ca_email', ''),
             'ca_mobile': customer_details.get('ca_mobile', '')
