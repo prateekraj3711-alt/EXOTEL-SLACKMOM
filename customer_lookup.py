@@ -70,12 +70,21 @@ class CustomerLookup:
             # Open the spreadsheet
             spreadsheet = self.client.open_by_key(self.spreadsheet_id)
             
-            logger.info(f"📄 Looking for worksheet: '{self.worksheet_name}'")
+            logger.info("📋 Available worksheets:")
+            for sheet in spreadsheet.worksheets():
+                logger.info(f"   - '{sheet.title}' (ID: {sheet.id})")
             
-            # Get the worksheet - EXACT NAME: "Customer POC"
-            worksheet = spreadsheet.worksheet(self.worksheet_name)
-            
-            logger.info(f"✅ Found worksheet: '{self.worksheet_name}'")
+            # Try to get worksheet by name first
+            try:
+                logger.info(f"📄 Trying to open worksheet by name: '{self.worksheet_name}'")
+                worksheet = spreadsheet.worksheet(self.worksheet_name)
+                logger.info(f"✅ Found worksheet by name: '{self.worksheet_name}'")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not find worksheet by name: {e}")
+                # Try by GID (498627995)
+                logger.info("📄 Trying to open worksheet by GID: 498627995")
+                worksheet = spreadsheet.get_worksheet_by_id(498627995)
+                logger.info(f"✅ Found worksheet by GID: '{worksheet.title}'")
             
             # Get all records
             records = worksheet.get_all_records()
