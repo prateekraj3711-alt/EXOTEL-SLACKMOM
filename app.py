@@ -414,14 +414,16 @@ Categorize the main topics discussed. Can be multiple types separated by commas.
 [Example: "Customer seeking clarification on the proactive email sent for candidate ID 263223 verification. Customer wants to know when the math unit starts and how long it takes to complete."]
 
 **Key Discussion Points:**
-[Extract 5-8 KEY POINTS from the conversation with FULL CONTEXT and actual details]
-[For 8-minute calls, include substantial discussion content, not just snippets]
-[Include specific quotes, explanations, and details mentioned in the conversation]
-[Format each point with context, not just one-liners]
-[Example: "- Agent: 'We have just initiated a mail that we have initiated a profile for verification of this candidate. Do you have his ID?' The candidate's ID is 263223."]
-[Example: "- Customer: 'The candidate's ID is 263223.' Agent confirmed this is just a proactive email that has been sent."]
-[Example: "- Customer: 'When the unit starts, how long does it take to complete the math?' Agent will provide information on the duration for completing the math unit."]
-[Include 5-8 detailed points for longer calls]
+[CRITICAL: Extract 5-8 ACTUAL DIRECT QUOTES from the conversation - DO NOT PARAPHRASE OR SUMMARIZE]
+[Use the EXACT WORDS spoken in the conversation]
+[For 8-minute calls, include substantial verbatim content from the actual conversation]
+[Format: Start each point with "- " and use quotation marks for direct quotes]
+[WRONG EXAMPLE (paraphrased): "- Divya from Spring Verifier identified the reason for the customer's call, referencing a missed call from the customer and inquiring about any queries."]
+[CORRECT EXAMPLE (actual quote): "- Divya: 'We have just initiated a mail that we have initiated a profile for verification of this candidate. Do you have his ID?' Customer responded with ID 263223."]
+[CORRECT EXAMPLE: "- Customer mentioned interacting with lawyer Utsav Kush who had promised to get back to them. Customer clarified they had already been in touch with Supriya."]
+[CORRECT EXAMPLE: "- Divya asked if the customer's query had been resolved. Customer responded that they still needed to get in touch with Supriya."]
+[Include 5-8 actual conversation points with direct quotes for longer calls]
+[NEVER paraphrase - always use actual words from the transcript]
 
 **Action Items:**
 [List specific, actionable next steps with details]
@@ -435,13 +437,15 @@ Categorize the main topics discussed. Can be multiple types separated by commas.
 
 CRITICAL REQUIREMENTS: 
 - For longer calls (5+ minutes), the MOM must extract SUBSTANTIAL CONTENT (minimum 5-8 key discussion points with full context)
-- Each "Key Discussion Point" should be a complete thought with context, not a one-liner
+- Each "Key Discussion Point" MUST use DIRECT QUOTES from the actual conversation - NO PARAPHRASING
+- Use quotation marks around the actual words spoken in the conversation
 - Include ACTUAL DETAILS from the conversation: IDs, names, specific questions asked, specific answers given
-- DO NOT summarize too much - include the actual conversation flow with details
-- For "Key Discussion Points" - USE ACTUAL CONTENT from the conversation with full context
-- Each section should be detailed and informative with specific facts
+- DO NOT summarize or paraphrase - use the EXACT WORDS from the transcript
+- For "Key Discussion Points" - QUOTE the actual conversation verbatim, do not rewrite in your own words
+- Each section should contain actual quotes and specific facts from the transcript
 - MUST include Tone, Mood Analysis, and Concern Type at the beginning
 - Mood Analysis is MANDATORY for customer satisfaction tracking
+- ABSOLUTELY NO PARAPHRASING - use actual conversation content only
 
 FORMAT:
 **Tone:** [Normal/Escalation]
@@ -471,14 +475,14 @@ Create a comprehensive MOM with full context and actual details from the convers
                     "messages": [
                         {
                             "role": "system",
-                            "content": "You are a professional customer support analyst who creates detailed, comprehensive meeting minutes with full context for longer calls. ALWAYS include Tone, Mood Analysis, and Concern Type fields in your response. For longer calls (5-10 minutes), extract substantial content with 5-8 detailed key discussion points including specific IDs, names, questions, and answers mentioned in the conversation."
+                            "content": "You are a professional customer support analyst who creates detailed meeting minutes using ACTUAL DIRECT QUOTES from conversations - NEVER paraphrase or summarize. ALWAYS include Tone, Mood Analysis, and Concern Type fields. For Key Discussion Points, you MUST use the EXACT WORDS spoken in the conversation with quotation marks. DO NOT rewrite or paraphrase - extract verbatim quotes from the transcript. For longer calls (5-10 minutes), extract 5-8 direct quotes from the actual conversation including specific IDs, names, questions, and answers."
                         },
                         {
                             "role": "user",
                             "content": prompt
                         }
                     ],
-                    "temperature": 0.3,
+                    "temperature": 0.1,
                     "max_tokens": 1500
                 }
                 
@@ -1012,18 +1016,20 @@ class SlackFormatter:
         
         # Format customer display name with company and CA name if available
         if customer_details:
-            company_name = customer_details.get('company_name', 'Unknown Company')
+            company_name = customer_details.get('company_name', 'Unavailable')
             ca_name = customer_details.get('ca_name', '')
             ca_email = customer_details.get('ca_email', '')
             
+            # Show company name only (no "Customer" prefix)
             if ca_name:
                 customer_legal_name = f"{company_name} ({ca_name})"
-                customer_contact_info = f"\n📧 *CA Email:* {ca_email}" if ca_email else ""
             else:
                 customer_legal_name = company_name
-                customer_contact_info = ""
+            
+            customer_contact_info = f"\n📧 *CA Email:* {ca_email}" if ca_email else ""
         else:
-            customer_legal_name = f"Customer {customer_number}"
+            # If not found in Google Sheet, show "Unavailable"
+            customer_legal_name = "Unavailable"
             customer_contact_info = ""
         
         # Build Exotel recording link
