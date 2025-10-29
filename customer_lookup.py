@@ -17,7 +17,7 @@ class CustomerLookup:
     def __init__(self):
         self.spreadsheet_url = "https://docs.google.com/spreadsheets/d/1to5o5DEvH8PWyuo89Dht-g__VNJw4NGAEP15jvgkWgo/edit?gid=498627995#gid=498627995"
         self.spreadsheet_id = "1to5o5DEvH8PWyuo89Dht-g__VNJw4NGAEP15jvgkWgo"
-        self.worksheet_name = "Customer POC"
+        self.worksheet_name = "Customer POC"  # EXACT SHEET NAME WITH SPACE
         self.client = None
         self.cache = {}  # Cache customer data to reduce API calls
         self.cache_loaded = False
@@ -30,7 +30,7 @@ class CustomerLookup:
             google_creds_json = os.getenv('GOOGLE_SHEETS_CREDENTIALS')
             
             if not google_creds_json:
-                logger.warning("Google Sheets credentials not found in environment - customer lookup disabled")
+                logger.warning("⚠️ Google Sheets credentials not found in environment - customer lookup disabled")
                 return
             
             # Parse credentials JSON
@@ -62,28 +62,41 @@ class CustomerLookup:
         """Load all customer data into cache for fast lookup."""
         try:
             if not self.client:
+                logger.warning("⚠️ Google Sheets client not initialized - cannot load customer data")
                 return False
+            
+            logger.info(f"📊 Opening spreadsheet: {self.spreadsheet_id}")
             
             # Open the spreadsheet
             spreadsheet = self.client.open_by_key(self.spreadsheet_id)
             
-            # Get the worksheet
+            logger.info(f"📄 Looking for worksheet: '{self.worksheet_name}'")
+            
+            # Get the worksheet - EXACT NAME: "Customer POC"
             worksheet = spreadsheet.worksheet(self.worksheet_name)
+            
+            logger.info(f"✅ Found worksheet: '{self.worksheet_name}'")
             
             # Get all records
             records = worksheet.get_all_records()
             
+            logger.info(f"📋 Retrieved {len(records)} records from sheet")
+            
             # Build cache with normalized phone numbers as keys
             self.cache = {}
+            phone_count = 0
+            
             for record in records:
                 ca_mobile = str(record.get('CA Mobile', '')).strip()
-                if ca_mobile:
+                company_name = str(record.get('Company Name', '')).strip()
+                
+                if ca_mobile and company_name:
                     # CA Mobile can have multiple numbers separated by commas
                     phone_numbers = [p.strip() for p in ca_mobile.split(',')]
                     
                     customer_details = {
                         'company_id': str(record.get('Company ID', '')),
-                        'company_name': str(record.get('Company Name', '')),
+                        'company_name': company_name,
                         'company_status': str(record.get('Company Status', '')),
                         'ca_name': str(record.get('CA Name', '')),
                         'ca_email': str(record.get('CA Email', '')),
@@ -96,13 +109,17 @@ class CustomerLookup:
                         if phone:  # Skip empty strings
                             clean_number = self.normalize_phone(phone)
                             self.cache[clean_number] = customer_details
+                            phone_count += 1
+                            logger.debug(f"  📞 Cached: {phone} → {company_name}")
             
             self.cache_loaded = True
-            logger.info(f"✅ Loaded {len(self.cache)} phone number mappings from Google Sheets")
+            logger.info(f"✅ Loaded {phone_count} phone number mappings from {len(records)} companies in Google Sheets")
             return True
             
         except Exception as e:
             logger.error(f"❌ Error loading customer cache: {e}")
+            logger.error(f"   Spreadsheet ID: {self.spreadsheet_id}")
+            logger.error(f"   Worksheet Name: '{self.worksheet_name}'")
             return False
     
     def lookup_customer(self, phone_number: str) -> Optional[Dict[str, str]]:
@@ -117,11 +134,12 @@ class CustomerLookup:
         """
         try:
             if not self.client:
-                logger.debug("Google Sheets client not initialized - skipping customer lookup")
+                logger.debug("⚠️ Google Sheets client not initialized - skipping customer lookup")
                 return None
             
             # Load cache if not already loaded
             if not self.cache_loaded:
+                logger.info("📥 Loading customer data from Google Sheets...")
                 if not self.load_customer_cache():
                     return None
             
@@ -137,7 +155,7 @@ class CustomerLookup:
             # Try exact match first
             if clean_number in self.cache:
                 customer_details = self.cache[clean_number]
-                logger.info(f"✅ Found customer details (exact match) for {phone_number}: {customer_details['company_name']}")
+                logger.info(f"✅ Found customer (exact match) for {phone_number}: {customer_details['company_name']}")
                 return customer_details
             
             # Try with 91 prefix (India country code)
@@ -145,7 +163,7 @@ class CustomerLookup:
                 clean_number_with_91 = '91' + clean_number
                 if clean_number_with_91 in self.cache:
                     customer_details = self.cache[clean_number_with_91]
-                    logger.info(f"✅ Found customer details (with +91) for {phone_number}: {customer_details['company_name']}")
+                    logger.info(f"✅ Found customer (with +91) for {phone_number}: {customer_details['company_name']}")
                     return customer_details
             
             # Try partial match (last 10 digits)
@@ -157,7 +175,9 @@ class CustomerLookup:
                     return details
             
             # No match found
-            logger.warning(f"❌ No customer details found for {phone_number} (tried: {clean_number}, 91{clean_number[-10:] if len(clean_number) >= 10 else clean_number}, last 10: {last_10})")
+            logger.warning(f"❌ No customer details found for {phone_number}")
+            logger.warning(f"   Tried: {clean_number}, 91{clean_number[-10:] if len(clean_number) >= 10 else clean_number}, last 10: {last_10}")
+            logger.warning(f"   Total cached numbers: {len(self.cache)}")
             return None
             
         except Exception as e:
@@ -176,9 +196,9 @@ class CustomerLookup:
             Formatted string for display
         """
         if not customer_details:
-            return f"Customer {fallback_number}"
+            return "Unavailable"
         
-        company_name = customer_details.get('company_name', 'Unknown Company')
+        company_name = customer_details.get('company_name', 'Unavailable')
         ca_name = customer_details.get('ca_name', '')
         
         if ca_name:
@@ -198,17 +218,16 @@ class CustomerLookup:
         """
         if not customer_details:
             return {
-                'company_name': 'Unknown',
-                'ca_name': 'Unknown',
-                'ca_email': 'N/A',
-                'ca_mobile': 'N/A'
+                'company_name': 'Unavailable',
+                'ca_name': '',
+                'ca_email': '',
+                'ca_mobile': ''
             }
         
         return {
-            'company_name': customer_details.get('company_name', 'Unknown'),
-            'ca_name': customer_details.get('ca_name', 'Unknown'),
-            'ca_email': customer_details.get('ca_email', 'N/A'),
-            'ca_mobile': customer_details.get('ca_mobile', 'N/A')
+            'company_name': customer_details.get('company_name', 'Unavailable'),
+            'ca_name': customer_details.get('ca_name', ''),
+            'ca_email': customer_details.get('ca_email', ''),
+            'ca_mobile': customer_details.get('ca_mobile', '')
         }
-
 
