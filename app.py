@@ -375,8 +375,14 @@ class MOMGenerator:
             "Content-Type": "application/json"
         }
     
-    def generate_mom(self, transcription: str) -> str:
-        """Generate structured Meeting Minutes from transcription with retry logic"""
+    def generate_mom(self, transcription: str, customer_name: str = "Customer", agent_name: str = "Agent") -> str:
+        """Generate structured Meeting Minutes from transcription with retry logic
+        
+        Args:
+            transcription: The call transcript text
+            customer_name: Name of the customer (from Google Sheets or phone number)
+            agent_name: Name of the agent (from agent database)
+        """
         max_retries = 3
         base_delay = 2
         
@@ -388,8 +394,14 @@ class MOMGenerator:
                     time.sleep(delay)
                 
                 logger.info(f"Generating MOM from transcription (attempt {attempt + 1}/{max_retries})...")
+                logger.info(f"   Customer: {customer_name}")
+                logger.info(f"   Agent: {agent_name}")
                 
                 prompt = f"""You are an expert at creating concise Meeting Minutes (MOM) for customer support calls.
+
+CRITICAL SPEAKER INFORMATION:
+- Customer Name: {customer_name}
+- Agent Name: {agent_name}
 
 Analyze this call transcription and create a structured MOM with these sections:
 
@@ -410,16 +422,16 @@ Categorize the main topics discussed. Can be multiple types separated by commas.
 
 **Key Discussion Points:**
 [CRITICAL: Extract 5-8 ACTUAL DIRECT QUOTES with CLEAR SPEAKER LABELS]
-[MANDATORY FORMAT: Each point MUST start with "Customer (Name):" or "Agent (Name):" followed by the actual quote in quotation marks]
+[MANDATORY FORMAT: Use "Customer ({customer_name}):" or "Agent ({agent_name}):" followed by the actual quote]
 [Use the EXACT WORDS spoken in the conversation]
 [CORRECT FORMAT EXAMPLES:]
-[- Customer (Chhaya): "We put some requests, like BGV requests. We need a report, actually."]
-[- Agent (Rahul): "I can send it to you right now. Or all the candidates who have completed?"]
-[- Customer (Chhaya): "You have added 11 candidates, out of which I think nine of them are complete."]
-[- Agent (Rahul): "I will send it to you, and I will mark these remaining people in the CC, all right?"]
+[- Customer ({customer_name}): "We put some requests, like BGV requests. We need a report, actually."]
+[- Agent ({agent_name}): "I can send it to you right now. Or all the candidates who have completed?"]
+[- Customer ({customer_name}): "You have added 11 candidates, out of which I think nine of them are complete."]
+[- Agent ({agent_name}): "I will send it to you, and I will mark these remaining people in the CC, all right?"]
 [WRONG FORMAT: "Customer mentioned needing help" - MISSING name and not a direct quote]
-[WRONG FORMAT: "- The agent said..." - MUST use format "Agent (Name): quote"]
-[ALWAYS include both role (Customer/Agent) AND the person's actual name in parentheses]
+[WRONG FORMAT: "- The agent said..." - MUST use the names provided above]
+[ALWAYS use Customer ({customer_name}) and Agent ({agent_name}) - DO NOT guess or infer names from the audio]
 [List 5-8 actual discussion points with clear speaker attribution for longer calls]
 
 **Action Items:**
@@ -465,7 +477,7 @@ Create the MOM in a clear, professional format with actual conversation content.
                     "messages": [
                         {
                             "role": "system",
-                            "content": "You are a professional customer support analyst who creates detailed meeting minutes. CRITICAL: In Key Discussion Points, EVERY quote MUST start with either 'Customer (Name):' or 'Agent (Name):' format. Example: '- Customer (Chhaya): \"We need a report\"' or '- Agent (Rahul): \"I will send it\"'. Never use generic labels. Always identify the specific person speaking. ALWAYS include Tone, Mood Analysis, and Concern Type fields."
+                            "content": f"You are a professional customer support analyst who creates detailed meeting minutes. CRITICAL: In Key Discussion Points, EVERY quote MUST use the exact names provided: 'Customer ({customer_name}):' and 'Agent ({agent_name}):'. DO NOT guess or infer names from the audio - use ONLY the names explicitly provided. Example: '- Customer ({customer_name}): \"exact quote\"' or '- Agent ({agent_name}): \"exact quote\"'. ALWAYS include Tone, Mood Analysis, and Concern Type fields."
                         },
                         {
                             "role": "user",
@@ -1001,8 +1013,18 @@ class SlackFormatter:
         duration_sec = call_data.get('duration', 0)
         duration_formatted = f"{duration_sec}s ({int(duration_sec // 60)}m {duration_sec % 60}s)"
         
-        # Customer Legal Name (use phone number for now, can be enhanced with Google Sheets lookup)
-        customer_legal_name = f"Customer {customer_number}"
+        # Lookup customer name from Google Sheets
+        customer_details = customer_lookup.lookup_customer(customer_number)
+        if customer_details:
+            company_name = customer_details.get('company_name', 'Name not found')
+            ca_name = customer_details.get('ca_name', '')
+            if ca_name:
+                customer_legal_name = f"{company_name} ({ca_name})"
+            else:
+                customer_legal_name = company_name
+        else:
+            # If not found in Google Sheets, show "Name not found"
+            customer_legal_name = "Name not found"
         
         # Build Exotel recording link
         exotel_link = call_data.get('recording_url', 'N/A')
@@ -1015,6 +1037,7 @@ class SlackFormatter:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 👤 *Customer:* {customer_legal_name}
+📞 *Customer Number:* `{customer_number}`
 📞 *Support Number:* `{support_number}`
 
 👔 *Agent:* {agent_name} {agent_mention}
@@ -1151,10 +1174,44 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
         else:
             logger.warning("Google Drive service not available - transcript not uploaded")
         
-        # Generate MOM from transcription
+        # Get agent and customer information for MOM generation
+        agent_info = SlackFormatter.find_agent_from_call(
+            call_data['from_number'],
+            call_data['to_number']
+        )
+        
+        # Determine customer number based on agent detection
+        if agent_info:
+            if agent_info['direction'] == "outgoing":
+                customer_number = call_data['to_number']
+            else:
+                customer_number = call_data['from_number']
+            agent_name = agent_info['name']
+        else:
+            # Fallback: assume first number is customer
+            customer_number = call_data['from_number']
+            agent_name = "Agent"
+        
+        # Lookup customer name from Google Sheets
+        customer_details = customer_lookup.lookup_customer(customer_number)
+        if customer_details:
+            company_name = customer_details.get('company_name', 'Customer')
+            ca_name = customer_details.get('ca_name', '')
+            if ca_name:
+                customer_name = f"{company_name} ({ca_name})"
+            else:
+                customer_name = company_name
+        else:
+            customer_name = "Customer"
+        
+        logger.info(f"📝 MOM Generation Context:")
+        logger.info(f"   Customer: {customer_name} ({customer_number})")
+        logger.info(f"   Agent: {agent_name}")
+        
+        # Generate MOM from transcription with customer and agent names
         if mom_generator:
             logger.info(f"Generating MOM for call {call_id}")
-            mom = mom_generator.generate_mom(transcription)
+            mom = mom_generator.generate_mom(transcription, customer_name=customer_name, agent_name=agent_name)
         else:
             logger.warning("MOM generator not available, using transcription")
             mom = transcription
