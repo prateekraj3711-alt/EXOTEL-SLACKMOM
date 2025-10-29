@@ -22,6 +22,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
+# Import customer lookup module
+from customer_lookup import CustomerLookup
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -389,9 +392,9 @@ class MOMGenerator:
                 
                 logger.info(f"Generating MOM from transcription (attempt {attempt + 1}/{max_retries})...")
                 
-                prompt = f"""You are an expert at creating concise Meeting Minutes (MOM) for customer support calls.
+                prompt = f"""You are an expert at creating comprehensive Meeting Minutes (MOM) for customer support calls, especially for longer calls (5-10 minutes).
 
-Analyze this call transcription and create a structured MOM with these sections:
+Analyze this call transcription and create a detailed, structured MOM with these sections:
 
 **Tone:** [REQUIRED - Choose ONE: "Normal" or "Escalation"]
 Determine if the call is an escalation (customer is frustrated/angry/upset/demanding manager) or normal (regular inquiry/polite conversation).
@@ -406,26 +409,37 @@ Categorize the main concern or issue type discussed. Can be multiple types separ
 Categorize the main topics discussed. Can be multiple types separated by commas.
 
 **Customer Issue:**
-[Summarize the main problem/concern the customer is reporting - minimum 1 line]
+[Provide a DETAILED summary of the main problem/concern the customer is reporting - minimum 2-3 sentences with full context]
+[Include specific details mentioned: IDs, names, dates, amounts, etc.]
+[Example: "Customer seeking clarification on the proactive email sent for candidate ID 263223 verification. Customer wants to know when the math unit starts and how long it takes to complete."]
 
 **Key Discussion Points:**
-[Extract ACTUAL QUOTES and statements from the real conversation - DO NOT rephrase or paraphrase]
-[Use direct quotes from what was actually said in the call]
-[Example: "Customer mentioned: 'I'm having trouble with...'" or "Agent explained: 'You need to...'"]
-[List at least 2-3 actual discussion points from the conversation - each on a new line]
+[Extract 5-8 KEY POINTS from the conversation with FULL CONTEXT and actual details]
+[For 8-minute calls, include substantial discussion content, not just snippets]
+[Include specific quotes, explanations, and details mentioned in the conversation]
+[Format each point with context, not just one-liners]
+[Example: "- Agent: 'We have just initiated a mail that we have initiated a profile for verification of this candidate. Do you have his ID?' The candidate's ID is 263223."]
+[Example: "- Customer: 'The candidate's ID is 263223.' Agent confirmed this is just a proactive email that has been sent."]
+[Example: "- Customer: 'When the unit starts, how long does it take to complete the math?' Agent will provide information on the duration for completing the math unit."]
+[Include 5-8 detailed points for longer calls]
 
 **Action Items:**
-[List specific actions needed to resolve this issue - each action on a new line]
+[List specific, actionable next steps with details]
+[Include who needs to do what, and any deadlines or IDs mentioned]
+[Example: "- Verify the candidate's ID 263223 for profile verification"]
+[Example: "- Provide information on the duration for completing the math unit"]
 
 **Resolution Status:**
-[State if issue was resolved or pending]
+[Provide detailed resolution status: "Resolved" / "Pending" / "Escalated"]
+[Include what was resolved and what remains pending]
 
 CRITICAL REQUIREMENTS: 
-- The MOM must have AT LEAST 3 substantial lines of content
-- For "Key Discussion Points" - USE ACTUAL WORDS from the conversation, NOT rephrased summaries
-- Include direct quotes or verbatim statements whenever possible
-- Each section should be detailed and informative
-- Include specific details from the transcription
+- For longer calls (5+ minutes), the MOM must extract SUBSTANTIAL CONTENT (minimum 5-8 key discussion points with full context)
+- Each "Key Discussion Point" should be a complete thought with context, not a one-liner
+- Include ACTUAL DETAILS from the conversation: IDs, names, specific questions asked, specific answers given
+- DO NOT summarize too much - include the actual conversation flow with details
+- For "Key Discussion Points" - USE ACTUAL CONTENT from the conversation with full context
+- Each section should be detailed and informative with specific facts
 - MUST include Tone, Mood Analysis, and Concern Type at the beginning
 - Mood Analysis is MANDATORY for customer satisfaction tracking
 
@@ -436,28 +450,28 @@ FORMAT:
 **Issue Type:** [One or more categories]
 
 **Customer Issue:**
-[Summary]
+[Detailed summary with full context - 2-3 sentences]
 
 **Key Discussion Points:**
-[Actual quotes]
+[5-8 detailed points with full context for longer calls]
 
 **Action Items:**
-[Actions]
+[Specific actionable items with details]
 
 **Resolution Status:**
-[Status]
+[Detailed status]
 
 Transcription:
 {transcription}
 
-Create the MOM in a clear, professional format with actual conversation content."""
+Create a comprehensive MOM with full context and actual details from the conversation. For an 8-minute call, include substantial content across all sections."""
 
                 payload = {
                     "model": "gpt-3.5-turbo",
                     "messages": [
                         {
                             "role": "system",
-                            "content": "You are a professional customer support analyst who creates detailed, well-structured meeting minutes with sufficient context. ALWAYS include Tone, Mood Analysis, and Concern Type fields in your response. These are critical for tracking customer satisfaction and issue categorization."
+                            "content": "You are a professional customer support analyst who creates detailed, comprehensive meeting minutes with full context for longer calls. ALWAYS include Tone, Mood Analysis, and Concern Type fields in your response. For longer calls (5-10 minutes), extract substantial content with 5-8 detailed key discussion points including specific IDs, names, questions, and answers mentioned in the conversation."
                         },
                         {
                             "role": "user",
@@ -465,7 +479,7 @@ Create the MOM in a clear, professional format with actual conversation content.
                         }
                     ],
                     "temperature": 0.3,
-                    "max_tokens": 800
+                    "max_tokens": 1500
                 }
                 
                 response = requests.post(
@@ -993,8 +1007,24 @@ class SlackFormatter:
         duration_sec = call_data.get('duration', 0)
         duration_formatted = f"{duration_sec}s ({int(duration_sec // 60)}m {duration_sec % 60}s)"
         
-        # Customer Legal Name (use phone number for now, can be enhanced with Google Sheets lookup)
-        customer_legal_name = f"Customer {customer_number}"
+        # Lookup customer details from Google Sheets
+        customer_details = customer_lookup.lookup_customer(customer_number)
+        
+        # Format customer display name with company and CA name if available
+        if customer_details:
+            company_name = customer_details.get('company_name', 'Unknown Company')
+            ca_name = customer_details.get('ca_name', '')
+            ca_email = customer_details.get('ca_email', '')
+            
+            if ca_name:
+                customer_legal_name = f"{company_name} ({ca_name})"
+                customer_contact_info = f"\n📧 *CA Email:* {ca_email}" if ca_email else ""
+            else:
+                customer_legal_name = company_name
+                customer_contact_info = ""
+        else:
+            customer_legal_name = f"Customer {customer_number}"
+            customer_contact_info = ""
         
         # Build Exotel recording link
         exotel_link = call_data.get('recording_url', 'N/A')
@@ -1006,7 +1036,8 @@ class SlackFormatter:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-👤 *Customer:* {customer_legal_name}
+👤 *Customer:* {customer_legal_name}{customer_contact_info}
+📞 *Customer Number:* `{customer_number}`
 📞 *Support Number:* `{support_number}`
 
 👔 *Agent:* {agent_name} {agent_mention}
@@ -1077,6 +1108,7 @@ class SlackFormatter:
 transcription_service = TranscriptionService(OPENAI_API_KEY) if OPENAI_API_KEY else None
 mom_generator = MOMGenerator(OPENAI_API_KEY) if OPENAI_API_KEY else None
 google_drive_service = GoogleDriveService(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET) if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET else None
+customer_lookup = CustomerLookup()
 
 def emergency_cleanup_old_records():
     """Emergency cleanup of old records that might cause duplicate posts"""
