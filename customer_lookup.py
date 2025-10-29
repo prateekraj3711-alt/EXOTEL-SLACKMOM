@@ -128,22 +128,36 @@ class CustomerLookup:
             # Clean phone number
             clean_number = self.normalize_phone(phone_number)
             
+            # Remove leading 0 if present (e.g., 06001813067 -> 6001813067)
+            if clean_number.startswith('0') and len(clean_number) > 10:
+                clean_number = clean_number[1:]
+            
+            logger.info(f"🔍 Looking up customer for: {phone_number} (normalized: {clean_number})")
+            
             # Try exact match first
             if clean_number in self.cache:
                 customer_details = self.cache[clean_number]
-                logger.info(f"✅ Found customer details for {phone_number}: {customer_details['company_name']}")
+                logger.info(f"✅ Found customer details (exact match) for {phone_number}: {customer_details['company_name']}")
                 return customer_details
             
+            # Try with 91 prefix (India country code)
+            if not clean_number.startswith('91') and len(clean_number) == 10:
+                clean_number_with_91 = '91' + clean_number
+                if clean_number_with_91 in self.cache:
+                    customer_details = self.cache[clean_number_with_91]
+                    logger.info(f"✅ Found customer details (with +91) for {phone_number}: {customer_details['company_name']}")
+                    return customer_details
+            
             # Try partial match (last 10 digits)
-            if len(clean_number) >= 10:
-                last_10 = clean_number[-10:]
-                for cached_number, details in self.cache.items():
-                    if cached_number.endswith(last_10) or last_10 in cached_number:
-                        logger.info(f"✅ Found customer (partial match) for {phone_number}: {details['company_name']}")
-                        return details
+            last_10 = clean_number[-10:] if len(clean_number) >= 10 else clean_number
+            for cached_number, details in self.cache.items():
+                # Match if last 10 digits are the same
+                if len(cached_number) >= 10 and cached_number[-10:] == last_10:
+                    logger.info(f"✅ Found customer (last 10 digits match) for {phone_number}: {details['company_name']}")
+                    return details
             
             # No match found
-            logger.debug(f"ℹ️ No customer details found for {phone_number}")
+            logger.warning(f"❌ No customer details found for {phone_number} (tried: {clean_number}, 91{clean_number[-10:] if len(clean_number) >= 10 else clean_number}, last 10: {last_10})")
             return None
             
         except Exception as e:
