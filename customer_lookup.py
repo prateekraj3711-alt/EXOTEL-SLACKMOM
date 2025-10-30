@@ -8,11 +8,12 @@ from google.oauth2.service_account import Credentials
 from typing import Dict, Optional
 import os
 import json
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
 class CustomerLookup:
-    """Lookup customer details from Google Sheets."""
+    """Lookup customer details from Google Sheets with auto-refresh."""
     
     def __init__(self):
         self.spreadsheet_url = "https://docs.google.com/spreadsheets/d/1to5o5DEvH8PWyuo89Dht-g__VNJw4NGAEP15jvgkWgo/edit?gid=498627995#gid=498627995"
@@ -21,6 +22,8 @@ class CustomerLookup:
         self.client = None
         self.cache = {}  # Cache customer data to reduce API calls
         self.cache_loaded = False
+        self.last_cache_refresh = None  # Track when cache was last refreshed
+        self.cache_refresh_interval = timedelta(minutes=30)  # Refresh every 30 minutes
         self._init_client()
     
     def _init_client(self):
@@ -122,7 +125,9 @@ class CustomerLookup:
                             logger.debug(f"  📞 Cached: {phone} → {company_name}")
             
             self.cache_loaded = True
+            self.last_cache_refresh = datetime.utcnow()  # Record refresh time
             logger.info(f"✅ Loaded {phone_count} phone number mappings from {len(records)} companies in Google Sheets")
+            logger.info(f"🕐 Cache refresh timestamp: {self.last_cache_refresh.strftime('%Y-%m-%d %H:%M:%S UTC')}")
             return True
             
         except Exception as e:
@@ -133,7 +138,7 @@ class CustomerLookup:
     
     def lookup_customer(self, phone_number: str) -> Optional[Dict[str, str]]:
         """
-        Lookup customer details by phone number.
+        Lookup customer details by phone number with auto-refresh every 30 minutes.
         
         Args:
             phone_number: Customer phone number to lookup
@@ -146,9 +151,20 @@ class CustomerLookup:
                 logger.debug("⚠️ Google Sheets client not initialized - skipping customer lookup")
                 return None
             
-            # Load cache if not already loaded
-            if not self.cache_loaded:
-                logger.info("📥 Loading customer data from Google Sheets...")
+            # Check if cache needs refresh (older than 30 minutes)
+            cache_expired = False
+            if self.last_cache_refresh:
+                time_since_refresh = datetime.utcnow() - self.last_cache_refresh
+                cache_expired = time_since_refresh > self.cache_refresh_interval
+                
+                if cache_expired:
+                    minutes_old = int(time_since_refresh.total_seconds() / 60)
+                    logger.info(f"🔄 Cache is {minutes_old} minutes old - refreshing from Google Sheets...")
+            
+            # Load cache if not loaded OR if expired
+            if not self.cache_loaded or cache_expired:
+                if not self.cache_loaded:
+                    logger.info("📥 Loading customer data from Google Sheets (first time)...")
                 if not self.load_customer_cache():
                     return None
             
