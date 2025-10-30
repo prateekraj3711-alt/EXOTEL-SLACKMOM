@@ -1196,26 +1196,31 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
             customer_number = call_data['from_number']
             agent_name = "Agent"
         
-        # Lookup customer name from Google Sheets
+        # Lookup customer name from Google Sheets (for Slack header only)
         customer_details = customer_lookup.lookup_customer(customer_number)
         if customer_details:
             company_name = customer_details.get('company_name', 'Customer')
             ca_name = customer_details.get('ca_name', '')
             if ca_name:
-                customer_name = f"{company_name} ({ca_name})"
+                customer_name_for_slack = f"{company_name} ({ca_name})"
             else:
-                customer_name = company_name
+                customer_name_for_slack = company_name
         else:
-            customer_name = "Customer"
+            customer_name_for_slack = "Name not found"
+        
+        # For MOM generation, use simple labels
+        customer_name_for_mom = "Customer"  # Simple label for Key Discussion Points
+        agent_name_for_mom = agent_name  # Keep agent name as-is
         
         logger.info(f"📝 MOM Generation Context:")
-        logger.info(f"   Customer: {customer_name} ({customer_number})")
-        logger.info(f"   Agent: {agent_name}")
+        logger.info(f"   Customer (Slack): {customer_name_for_slack} ({customer_number})")
+        logger.info(f"   Customer (MOM): {customer_name_for_mom}")
+        logger.info(f"   Agent: {agent_name_for_mom}")
         
-        # Generate MOM from transcription with customer and agent names
+        # Generate MOM from transcription with simple customer label
         if mom_generator:
             logger.info(f"Generating MOM for call {call_id}")
-            mom = mom_generator.generate_mom(transcription, customer_name=customer_name, agent_name=agent_name)
+            mom = mom_generator.generate_mom(transcription, customer_name=customer_name_for_mom, agent_name=agent_name_for_mom)
         else:
             logger.warning("MOM generator not available, using transcription")
             mom = transcription
