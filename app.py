@@ -425,16 +425,16 @@ Categorize the main topics discussed. Can be multiple types separated by commas.
 
 **Key Discussion Points:**
 [CRITICAL: Extract 5-8 ACTUAL DIRECT QUOTES with CLEAR SPEAKER LABELS]
-[MANDATORY FORMAT: Use "Customer ({customer_name}):" or "Agent ({agent_name}):" followed by the actual quote]
+[MANDATORY FORMAT: Use "Customer:" or "Agent ({agent_name}):" followed by the actual quote]
 [Use the EXACT WORDS spoken in the conversation]
 [CORRECT FORMAT EXAMPLES:]
-[- Customer ({customer_name}): "We put some requests, like BGV requests. We need a report, actually."]
+[- Customer: "We put some requests, like BGV requests. We need a report, actually."]
 [- Agent ({agent_name}): "I can send it to you right now. Or all the candidates who have completed?"]
-[- Customer ({customer_name}): "You have added 11 candidates, out of which I think nine of them are complete."]
+[- Customer: "You have added 11 candidates, out of which I think nine of them are complete."]
 [- Agent ({agent_name}): "I will send it to you, and I will mark these remaining people in the CC, all right?"]
-[WRONG FORMAT: "Customer mentioned needing help" - MISSING name and not a direct quote]
-[WRONG FORMAT: "- The agent said..." - MUST use the names provided above]
-[ALWAYS use Customer ({customer_name}) and Agent ({agent_name}) - DO NOT guess or infer names from the audio]
+[WRONG FORMAT: "Customer (Customer):" - DO NOT add extra labels to Customer]
+[WRONG FORMAT: "- The agent said..." - MUST use the format above]
+[ALWAYS use "Customer:" (no extra labels) and "Agent ({agent_name}):" with actual agent name]
 [List 5-8 actual discussion points with clear speaker attribution for longer calls]
 
 **Action Items:**
@@ -480,7 +480,7 @@ Create the MOM in a clear, professional format with actual conversation content.
                     "messages": [
                         {
                             "role": "system",
-                            "content": f"You are a professional customer support analyst who creates detailed meeting minutes. CRITICAL: In Key Discussion Points, EVERY quote MUST use the exact names provided: 'Customer ({customer_name}):' and 'Agent ({agent_name}):'. DO NOT guess or infer names from the audio - use ONLY the names explicitly provided. Example: '- Customer ({customer_name}): \"exact quote\"' or '- Agent ({agent_name}): \"exact quote\"'. ALWAYS include Tone, Mood Analysis, and Concern Type fields."
+                            "content": f"You are a professional customer support analyst who creates detailed meeting minutes. CRITICAL: In Key Discussion Points, EVERY quote MUST use this exact format: 'Customer:' (no extra labels) and 'Agent ({agent_name}):' (with agent name in parentheses). DO NOT use 'Customer (Customer):' or any other variation. Example: '- Customer: \"exact quote\"' or '- Agent ({agent_name}): \"exact quote\"'. ALWAYS include Tone, Mood Analysis, and Concern Type fields."
                         },
                         {
                             "role": "user",
