@@ -22,6 +22,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
+# Import customer lookup module
+from customer_lookup import CustomerLookup
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -1108,6 +1111,7 @@ class SlackFormatter:
 transcription_service = TranscriptionService(OPENAI_API_KEY) if OPENAI_API_KEY else None
 mom_generator = MOMGenerator(OPENAI_API_KEY) if OPENAI_API_KEY else None
 google_drive_service = GoogleDriveService(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET) if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET else None
+customer_lookup = CustomerLookup()  # Initialize customer lookup service
 
 def emergency_cleanup_old_records():
     """Emergency cleanup of old records that might cause duplicate posts"""
