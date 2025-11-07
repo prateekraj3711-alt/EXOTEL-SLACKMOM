@@ -424,18 +424,21 @@ Categorize the main topics discussed. Can be multiple types separated by commas.
 [Summarize the main problem/concern the customer is reporting - minimum 1 line]
 
 **Key Discussion Points:**
-[CRITICAL: Extract 5-8 ACTUAL DIRECT QUOTES with CLEAR SPEAKER LABELS]
-[MANDATORY FORMAT: Use "Customer:" or "Agent ({agent_name}):" followed by the actual quote]
-[Use the EXACT WORDS spoken in the conversation]
-[CORRECT FORMAT EXAMPLES:]
-[- Customer: "We put some requests, like BGV requests. We need a report, actually."]
-[- Agent ({agent_name}): "I can send it to you right now. Or all the candidates who have completed?"]
-[- Customer: "You have added 11 candidates, out of which I think nine of them are complete."]
-[- Agent ({agent_name}): "I will send it to you, and I will mark these remaining people in the CC, all right?"]
-[WRONG FORMAT: "Customer (Customer):" - DO NOT add extra labels to Customer]
-[WRONG FORMAT: "- The agent said..." - MUST use the format above]
-[ALWAYS use "Customer:" (no extra labels) and "Agent ({agent_name}):" with actual agent name]
-[List 5-8 actual discussion points with clear speaker attribution for longer calls]
+[CRITICAL: Extract 5-8 key discussion points in natural narrative format]
+[MANDATORY FORMAT: Write naturally without explicit speaker labels - identify speaker within the sentence]
+[Use natural flow like "Agent confirmed..." or "Customer asked..." - no "Customer:" or "Agent (Name):" prefixes]
+[PARAPHRASE the conversation while RETAINING the ACTUAL CONTEXT and meaning]
+[Make it look professional and polished - clean up filler words, hesitations, and casual speech]
+[Keep all important details, numbers, names, deadlines, and specific information]
+[CORRECT FORMAT EXAMPLES (Paraphrased - Professional Narrative):]
+[- Agent confirmed verification for Maksud Ariba Allay and identified a minor discrepancy.]
+[- Customer asked for confirmation on when the report will be ready.]
+[- Agent committed to completing it by end of day.]
+[- Customer requested a BVG report for multiple candidates and needs it promptly.]
+[- Agent offered to send the report immediately and asked if the customer wants reports for all completed candidates.]
+[WRONG FORMAT: "Customer: Requested..." or "Agent (Name): Offered..." - DO NOT use explicit speaker labels]
+[WRONG FORMAT: "The agent mentioned..." - Use "Agent mentioned..." instead]
+[Paraphrase naturally while preserving all critical context, timelines, commitments, and specific details]
 
 **Action Items:**
 [List specific actions needed to resolve this issue - each action on a new line]
@@ -445,8 +448,10 @@ Categorize the main topics discussed. Can be multiple types separated by commas.
 
 CRITICAL REQUIREMENTS: 
 - The MOM must have AT LEAST 3 substantial lines of content
-- For "Key Discussion Points" - USE ACTUAL WORDS from the conversation, NOT rephrased summaries
-- Include direct quotes or verbatim statements whenever possible
+- For "Key Discussion Points" - Use NATURAL NARRATIVE FORMAT without explicit speaker labels (e.g., "Agent confirmed..." or "Customer asked...")
+- PARAPHRASE the conversation professionally while RETAINING all context and meaning
+- Clean up filler words, hesitations, and casual speech to make it look polished
+- Keep all important details: numbers, names, deadlines, commitments, and specific information
 - Each section should be detailed and informative
 - Include specific details from the transcription
 - MUST include Tone, Mood Analysis, and Concern Type at the beginning
@@ -462,7 +467,7 @@ FORMAT:
 [Summary]
 
 **Key Discussion Points:**
-[Actual quotes]
+[Narrative format discussion points - natural flow without explicit speaker labels, professional and polished]
 
 **Action Items:**
 [Actions]
@@ -480,7 +485,7 @@ Create the MOM in a clear, professional format with actual conversation content.
                     "messages": [
                         {
                             "role": "system",
-                            "content": f"You are a professional customer support analyst who creates detailed meeting minutes. CRITICAL: In Key Discussion Points, EVERY quote MUST use this exact format: 'Customer:' (no extra labels) and 'Agent ({agent_name}):' (with agent name in parentheses). DO NOT use 'Customer (Customer):' or any other variation. Example: '- Customer: \"exact quote\"' or '- Agent ({agent_name}): \"exact quote\"'. ALWAYS include Tone, Mood Analysis, and Concern Type fields."
+                            "content": f"You are a professional customer support analyst who creates detailed meeting minutes. CRITICAL: In Key Discussion Points, write in natural narrative format WITHOUT explicit speaker labels. Identify the speaker naturally within each sentence (e.g., 'Agent confirmed...' or 'Customer asked...'). Paraphrase professionally while retaining all context. Clean up filler words and casual speech to make it polished. Example: '- Agent confirmed verification for Maksud Ariba Allay and identified a minor discrepancy.' or '- Customer asked for confirmation on when the report will be ready.'. DO NOT use 'Customer:' or 'Agent (Name):' prefixes. DO NOT use quote marks. ALWAYS include Tone, Mood Analysis, and Concern Type fields."
                         },
                         {
                             "role": "user",
