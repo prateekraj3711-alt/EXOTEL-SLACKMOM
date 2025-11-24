@@ -157,8 +157,7 @@ Security notes
 - Do not commit secrets to the repo. Use environment variables or your deployment platform's secret store.
 - Google Sheets service account JSON should be stored securely and not exposed.
 
-License
-- No license file is provided in this repository. Add a LICENSE (e.g., MIT) if you want to make reuse terms explicit.
+
 
 Maintainer / Contact
 - Repository: https://github.com/prateekraj3711-alt/EXOTEL-SLACKMOM
@@ -167,7 +166,5 @@ Maintainer / Contact
 Acknowledgements
 - Built with FastAPI, OpenAI Whisper, Slack, Google Drive & Google Sheets APIs.
 
-If you'd like, I can:
-- Draft a sample docker-compose.yml override with secrets placeholders,
-- Create a README badge list (build/health),
+
 - Or produce a short CONTRIBUTING.md or LICENSE file.
