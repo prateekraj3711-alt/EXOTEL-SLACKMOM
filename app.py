@@ -1052,29 +1052,28 @@ class SlackFormatter:
         recording_display = f"<{exotel_link}|Listen on Exotel>" if exotel_link != 'N/A' else 'None'
         
         # Main message body - clean and focused
+        # Main message body - Professional & Clean
         message = f"""{title_emoji} *{title_text}*
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━
+*Customer Details*
+• Name: {customer_legal_name}
+• Number: `{customer_number}`
+• Support Line: `{support_number}`
 
-👤 *Customer:* {customer_legal_name}
-📞 *Customer Number:* `{customer_number}`
-📞 *Support Number:* `{support_number}`
+*Agent Details*
+• Agent: {agent_name} {agent_mention}
+• Department: {department}
 
-👔 *Agent:* {agent_name} {agent_mention}
-🏢 *Department:* {department}
+*Call Duration & Time*
+• Time: {timestamp_formatted}
+• Duration: {duration_formatted}
 
-📅 *Date of Call:* {date_only}
-🕐 *Time:* {timestamp_formatted}
-⏱️ *Duration:* {duration_formatted}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
+*Summary*
 {content_section}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🔗 *Call Recording:* {recording_display}
-🆔 *Call ID:* `{call_data['call_id']}`"""
+*Resources*
+• Recording: {recording_display}
+• Call ID: `{call_data['call_id']}`"""
         
         return {
             'message': message,
