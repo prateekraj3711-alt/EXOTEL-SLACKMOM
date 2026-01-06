@@ -1028,7 +1028,13 @@ class SlackFormatter:
         elif call_type == "Voicemail Call":
             title_emoji = "📠"
             title_text = "Voicemail Received"
-            content_section = f"📝 *Voicemail recorded.* Check recording link below."
+            
+            # If transcription is available (MOM variable holds transcription for voicemails)
+            if mom and len(mom) > 10:
+                short_transcription = mom[:1500] + "..." if len(mom) > 1500 else mom
+                content_section = f"📝 *Voicemail Transcription:*\n\n{short_transcription}"
+            else:
+                content_section = f"📝 *Voicemail recorded.* Check recording link below (Transcription unavailable or too short)."
         else:
             title_emoji = "📞"
             title_text = "Customer Support Call Summary"
