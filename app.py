@@ -988,19 +988,26 @@ class SlackFormatter:
         
         # Format timestamp - CONVERT TO IST
         timestamp = call_data.get('timestamp', datetime.utcnow().isoformat())
-        if 'T' in timestamp:
-            dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-        elif ' ' in timestamp:
-            # Handle Exotel format: 2026-01-02 19:08:36
-            try:
-                dt = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
-            except ValueError:
-                dt = datetime.utcnow()
-        else:
-            dt = datetime.utcnow()
-
-        ist_offset = timedelta(hours=5, minutes=30)
-        dt_ist = dt + ist_offset
+        
+        # Default to UTC now
+        dt_ist = datetime.utcnow() + timedelta(hours=5, minutes=30)
+        
+        try:
+            if 'T' in timestamp:
+                # ISO Format (UTC): "2026-01-06T13:02:33.989386Z"
+                # Parse as UTC, then convert to IST
+                dt_utc = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                dt_ist = dt_utc + timedelta(hours=5, minutes=30)
+            elif ' ' in timestamp:
+                # Exotel/Zapier Format (Likely ALREADY IST): "2025-11-07 11:31:02"
+                # Assuming this is local time (IST), so keep as is
+                dt_ist = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+            else:
+                # Fallback
+                dt_ist = datetime.utcnow() + timedelta(hours=5, minutes=30)
+        except Exception as e:
+            logger.warning(f"⚠️ Timestamp parsing error: {e}. Using current IST time.")
+            
         timestamp_formatted = dt_ist.strftime('%Y-%m-%d %H:%M:%S IST')
         date_only = dt_ist.strftime('%Y-%m-%d')
         
