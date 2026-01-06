@@ -1,40 +1,16 @@
 {
-  "_comment": "12 CUSTOMER SUPPORT Agents - Agent mapping by phone number for smart detection",
-  "_instructions": "Phone numbers are normalized (digits only). Email used for Slack tagging. System checks BOTH from_number and to_number against this database.",
+  "_comment": "31 AUTHORIZED AGENTS - Strictly filtering calls for these numbers only",
+  "_instructions": "Phone numbers are normalized (digits only). System checks BOTH from_number and to_number against this database.",
   
-  "7799309499": {
-    "name": "Divya Karlapudi",
-    "email": "divya.karlapudi@springverify.in",
+  "8126033006": {
+    "name": "Syed Wali",
+    "email": "syed.wali@springworks.in",
     "department": "CUSTOMER SUPPORT",
     "team": "Support"
   },
-  "9311633945": {
-    "name": "Vaibhav Agarwal",
-    "email": "vaibhav.agarwal@springverify.in",
-    "department": "CUSTOMER SUPPORT",
-    "team": "Support"
-  },
-  "8918062860": {
-    "name": "Supriya Chettri",
-    "email": "supriya.chettri@springverify.in",
-    "department": "CUSTOMER SUPPORT",
-    "team": "Support"
-  },
-  "7569954922": {
-    "name": "Mohan",
-    "email": "sai.ranga@springverify.in",
-    "department": "CUSTOMER SUPPORT",
-    "team": "Support"
-  },
-  "9852338574": {
-    "name": "Md Armaan",
-    "email": "md.armaan@springworks.in",
-    "department": "CUSTOMER SUPPORT",
-    "team": "Support"
-  },
-  "9663175704": {
-    "name": "Ragul A S",
-    "email": "ragul.as@springworks.in",
+  "9902353404": {
+    "name": "Mrinalini Krishnan",
+    "email": "mrinalini.krishnan@springworks.in",
     "department": "CUSTOMER SUPPORT",
     "team": "Support"
   },
@@ -44,9 +20,15 @@
     "department": "CUSTOMER SUPPORT",
     "team": "Support"
   },
-  "9902352404": {
-    "name": "Mrinalini Krishnan",
-    "email": "mrinalini.krishnan@springworks.in",
+  "9663175704": {
+    "name": "Ragul A S",
+    "email": "ragul.as@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support"
+  },
+  "8219834257": {
+    "name": "Arsh Ahmed Chauhan",
+    "email": "arsh.chauhan@springverify.in",
     "department": "CUSTOMER SUPPORT",
     "team": "Support"
   },
@@ -56,22 +38,155 @@
     "department": "CUSTOMER SUPPORT",
     "team": "Support"
   },
-  "8126033006": {
-    "name": "Syed Wali",
-    "email": "syed.wali@springworks.in",
+  "9685410666": {
+    "name": "Kajal Jaisinghani",
+    "email": "kajal.jaisinghani@springworks.in",
     "department": "CUSTOMER SUPPORT",
     "team": "Support"
   },
-  "9721439156": {
-    "name": "Uttkarsh Tripathi",
-    "email": "uttkarsh.tripathi@springverify.in",
+  "8989991781": {
+    "name": "Khushi Jain",
+    "email": "khushi.jain@springworks.in",
     "department": "CUSTOMER SUPPORT",
     "team": "Support"
   },
-  "8219834257": {
-    "name": "Arsh Ahmed Chauhan",
-    "email": "arsh.chauhan@springverify.in",
+  "8445440260": {
+    "name": "Preet Seerha",
+    "email": "preet.seerha@springworks.in",
     "department": "CUSTOMER SUPPORT",
     "team": "Support"
+  },
+  "9996788409": {
+    "name": "Alisha",
+    "email": "alisha@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support"
+  },
+  "9996874749": {
+    "name": "Abhi Batra",
+    "email": "abhi.batra@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support"
+  },
+  "8423774921": {
+    "name": "Stuti Mishra",
+    "email": "stuti.mishra@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support"
+  },
+  "6305462499": {
+    "name": "Kavya Deepika",
+    "email": "kavya.deepika@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support"
+  },
+  
+  "6005065997": {
+    "name": "Diksha Shah",
+    "email": "diksha.shah@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support-CAND"
+  },
+  "6395321693": {
+    "name": "Satya Aneja",
+    "email": "satya.aneja@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support-CAND"
+  },
+  "9905355916": {
+    "name": "Ananya Ranjan",
+    "email": "ananya.ranjan@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support-CAND"
+  },
+  "9320104077": {
+    "name": "Sadiyah Ansari",
+    "email": "sadiyah.ansari@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support-CAND"
+  },
+  "8971387881": {
+    "name": "Shamshad",
+    "email": "shamshad@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support-CAND"
+  },
+  "7987472807": {
+    "name": "Neelam Tiwari",
+    "email": "neelam.tiwari@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support-CAND"
+  },
+  "8822191923": {
+    "name": "Debopriya Singh",
+    "email": "debopriya.singh@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support-CAND"
+  },
+  "7012375329": {
+    "name": "Ajay Raj",
+    "email": "ajay.raj@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support-CAND"
+  },
+  "8087588149": {
+    "name": "Manish Andhe",
+    "email": "manish.andhe@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support-CAND"
+  },
+  "8918008527": {
+    "name": "Hrisikesh Roy",
+    "email": "hrisikesh.roy@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support-CAND"
+  },
+  "9360118504": {
+    "name": "Gowri Kishore",
+    "email": "gowri.kishore@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support-CAND"
+  },
+  "9036410374": {
+    "name": "Shivani Yaragatti",
+    "email": "shivani.yaragatti@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support-CAND"
+  },
+  "9175927843": {
+    "name": "Sandeep Deshmukh",
+    "email": "sandeep.deshmukh@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support-CAND"
+  },
+  "8792211701": {
+    "name": "Mehak Naaz",
+    "email": "mehak.naaz@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support-CAND"
+  },
+  "9833561483": {
+    "name": "Ronak Chhadva",
+    "email": "ronak.chhadva@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support-CAND"
+  },
+  "8296984480": {
+    "name": "Shahina Begam",
+    "email": "shahina.begam@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support-CAND"
+  },
+  "6363353727": {
+    "name": "Sreeja Yatakal",
+    "email": "sreeja.yatakal@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support-CAND"
+  },
+  "9742021912": {
+    "name": "Lakshmi Balaji",
+    "email": "lakshmi.balaji@springworks.in",
+    "department": "CUSTOMER SUPPORT",
+    "team": "Support-CAND"
   }
 }

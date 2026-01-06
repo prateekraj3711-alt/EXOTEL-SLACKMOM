@@ -84,24 +84,31 @@ def load_agent_mapping():
 load_agent_mapping()
 
 # Pydantic Models
-class ZapierWebhookPayload(BaseModel):
-    """Payload from Zapier webhook"""
-    call_id: str = Field(..., description="Exotel Call ID (Sid)")
-    from_number: str = Field(..., description="Caller number")
-    to_number: str = Field(..., description="Called number")
-    duration: int = Field(..., description="Call duration in seconds")
-    recording_url: Optional[str] = Field(None, description="Recording URL from Exotel")
-    timestamp: Optional[str] = Field(None, description="Call timestamp")
-    status: str = Field(default="completed", description="Call status")
+class ExotelWebhookPayload(BaseModel):
+    """Payload from Exotel webhook"""
+    call_id: str = Field(..., alias="Sid", description="Exotel Call ID (Sid)")
+    from_number: str = Field(..., alias="From", description="Caller number")
+    to_number: str = Field(..., alias="PhoneNumber", description="Called number")
+    duration: int = Field(0, alias="Duration", description="Call duration in seconds")
+    price: Optional[float] = Field(None, alias="Price", description="Call price")
+    direction: str = Field(..., alias="Direction", description="Call direction (inbound/outbound)")
+    recording_url: Optional[str] = Field(None, alias="RecordingUrl", description="Recording URL from Exotel")
+    timestamp: Optional[str] = Field(None, alias="StartTime", description="Call timestamp")
+    status: str = Field(default="completed", alias="Status", description="Call status")
+    
+    # Optional fields that might be present
     agent_phone: Optional[str] = Field(None, description="Agent phone number")
     agent_name: Optional[str] = Field(None, description="Agent name")
     agent_slack_handle: Optional[str] = Field(None, description="Agent Slack handle")
     department: str = Field(default="Customer Success", description="Department")
     customer_segment: str = Field(default="General", description="Customer segment")
 
+    class Config:
+        allow_population_by_field_name = True
+
 
 class WebhookResponse(BaseModel):
-    """Response to Zapier webhook"""
+    """Response to webhook"""
     success: bool
     message: str
     call_id: str
@@ -868,96 +875,70 @@ class SlackFormatter:
     def find_agent_from_call(from_number: str, to_number: str) -> Optional[Dict[str, str]]:
         """
         SMART AGENT DETECTION:
-        Check both from_number and to_number against agent database.
+        Check both from_number and to_number against authorized agent database ONLY.
         Returns agent info if found, None otherwise.
         """
         from_clean = SlackFormatter.normalize_phone(from_number)
         to_clean = SlackFormatter.normalize_phone(to_number)
         
-        logger.info(f"🔍 Checking for agent match:")
-        logger.info(f"   From: {from_number} (normalized: {from_clean})")
-        logger.info(f"   To: {to_number} (normalized: {to_clean})")
+        logger.debug(f"🔍 Checking for agent match: From={from_clean}, To={to_clean}")
         
-        # First, try Slack workspace lookup for both numbers
-        if slack_user_lookup:
-            # Check from_number in Slack
-            slack_user = slack_user_lookup.get_user_by_phone(from_number)
-            if slack_user:
-                user_id = slack_user.get('user_id', '')
-                email = slack_user.get('email', '')
-                slack_mention = f"<@{user_id}>" if user_id else f"📧 {email}"
-                
-                logger.info(f"✅ Found agent (from_number) in Slack: {slack_user['name']} - {email}")
-                return {
-                    "phone": from_number,
-                    "name": slack_user['name'],
-                    "slack_mention": slack_mention,
-                    "email": email,
-                    "user_id": user_id,
-                    "department": slack_user.get('department', 'Customer Success'),
-                    "team": "Support",
-                    "direction": "outgoing"  # Agent is caller
-                }
-            
-            # Check to_number in Slack
-            slack_user = slack_user_lookup.get_user_by_phone(to_number)
-            if slack_user:
-                user_id = slack_user.get('user_id', '')
-                email = slack_user.get('email', '')
-                slack_mention = f"<@{user_id}>" if user_id else f"📧 {email}"
-                
-                logger.info(f"✅ Found agent (to_number) in Slack: {slack_user['name']} - {email}")
-                return {
-                    "phone": to_number,
-                    "name": slack_user['name'],
-                    "slack_mention": slack_mention,
-                    "email": email,
-                    "user_id": user_id,
-                    "department": slack_user.get('department', 'Customer Success'),
-                    "team": "Support",
-                    "direction": "incoming"  # Agent is receiver
-                }
-        
-        # Check agent_mapping.json database (97 agents)
+        # Check agent_mapping.json database (31 authorized agents)
         for mapped_phone, agent_data in AGENT_MAPPING.items():
             mapped_clean = SlackFormatter.normalize_phone(mapped_phone)
             
-            # Check if from_number matches
+            # Check if from_number matches (Agent is caller)
             if mapped_clean == from_clean:
                 email = agent_data.get('email', '')
-                slack_mention = f"📧 {email}" if email else "@support"
+                name = agent_data.get('name', 'Support Agent')
                 
-                logger.info(f"✅ Found agent (from_number) in database: {agent_data.get('name')} - {email}")
+                # Try to enrich with Slack info if available
+                slack_mention = f"📧 {email}" if email else "@support"
+                user_id = ""
+                if slack_user_lookup:
+                    slack_user = slack_user_lookup.get_user_by_phone(from_number)
+                    if slack_user:
+                        user_id = slack_user.get('user_id', '')
+                        slack_mention = f"<@{user_id}>" if user_id else slack_mention
+
+                logger.info(f"✅ Found authorized agent (from_number): {name}")
                 return {
                     "phone": from_number,
-                    "name": agent_data.get('name', 'Support Agent'),
+                    "name": name,
                     "slack_mention": slack_mention,
                     "email": email,
-                    "user_id": "",
-                    "department": agent_data.get('department', 'Customer Success'),
+                    "user_id": user_id,
+                    "department": agent_data.get('department', 'CUSTOMER SUPPORT'),
                     "team": agent_data.get('team', 'Support'),
-                    "direction": "outgoing"  # Agent is caller
+                    "direction": "outgoing"
                 }
             
-            # Check if to_number matches
+            # Check if to_number matches (Agent is receiver)
             if mapped_clean == to_clean:
                 email = agent_data.get('email', '')
-                slack_mention = f"📧 {email}" if email else "@support"
+                name = agent_data.get('name', 'Support Agent')
                 
-                logger.info(f"✅ Found agent (to_number) in database: {agent_data.get('name')} - {email}")
+                # Try to enrich with Slack info if available
+                slack_mention = f"📧 {email}" if email else "@support"
+                user_id = ""
+                if slack_user_lookup:
+                    slack_user = slack_user_lookup.get_user_by_phone(to_number)
+                    if slack_user:
+                        user_id = slack_user.get('user_id', '')
+                        slack_mention = f"<@{user_id}>" if user_id else slack_mention
+
+                logger.info(f"✅ Found authorized agent (to_number): {name}")
                 return {
                     "phone": to_number,
-                    "name": agent_data.get('name', 'Support Agent'),
+                    "name": name,
                     "slack_mention": slack_mention,
                     "email": email,
-                    "user_id": "",
-                    "department": agent_data.get('department', 'Customer Success'),
+                    "user_id": user_id,
+                    "department": agent_data.get('department', 'CUSTOMER SUPPORT'),
                     "team": agent_data.get('team', 'Support'),
-                    "direction": "incoming"  # Agent is receiver
+                    "direction": "incoming"
                 }
         
-        # No agent found - return None
-        logger.warning(f"⚠️ No agent found for from: {from_number} or to: {to_number}")
         return None
     
     @staticmethod
@@ -995,7 +976,6 @@ class SlackFormatter:
             logger.warning(f"⚠️ No agent found in database for call {call_data['call_id']}")
             logger.warning(f"   From: {call_data['from_number']}")
             logger.warning(f"   To: {call_data['to_number']}")
-            logger.warning(f"   💡 TIP: Add these numbers to agent_mapping.json if they are agents")
             
             # Assume incoming call (customer called support) as default
             support_number = call_data.get('to_number', 'Unknown')
@@ -1010,13 +990,19 @@ class SlackFormatter:
         timestamp = call_data.get('timestamp', datetime.utcnow().isoformat())
         if 'T' in timestamp:
             dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-            ist_offset = timedelta(hours=5, minutes=30)
-            dt_ist = dt + ist_offset
-            timestamp_formatted = dt_ist.strftime('%Y-%m-%d %H:%M:%S IST')
-            date_only = dt_ist.strftime('%Y-%m-%d')
+        elif ' ' in timestamp:
+            # Handle Exotel format: 2026-01-02 19:08:36
+            try:
+                dt = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                dt = datetime.utcnow()
         else:
-            timestamp_formatted = timestamp + ' IST'
-            date_only = timestamp
+            dt = datetime.utcnow()
+
+        ist_offset = timedelta(hours=5, minutes=30)
+        dt_ist = dt + ist_offset
+        timestamp_formatted = dt_ist.strftime('%Y-%m-%d %H:%M:%S IST')
+        date_only = dt_ist.strftime('%Y-%m-%d')
         
         duration_sec = call_data.get('duration', 0)
         duration_formatted = f"{duration_sec}s ({int(duration_sec // 60)}m {duration_sec % 60}s)"
@@ -1031,16 +1017,29 @@ class SlackFormatter:
             else:
                 customer_legal_name = company_name
         else:
-            # If not found in Google Sheets, show "Name not found"
             customer_legal_name = "Name not found"
         
+        # Determine call type and emoji
+        call_type = call_data.get('call_type', 'Normal')
+        if call_type == "Missed Call":
+            title_emoji = "📵"
+            title_text = "Missed Call Alert"
+            content_section = f"⚠️ *Call was missed.* No recording available."
+        elif call_type == "Voicemail Call":
+            title_emoji = "📠"
+            title_text = "Voicemail Received"
+            content_section = f"📝 *Voicemail recorded.* Check recording link below."
+        else:
+            title_emoji = "📞"
+            title_text = "Customer Support Call Summary"
+            content_section = f"📝 *Meeting Minutes (MOM):*\n\n{mom}"
+
         # Build Exotel recording link
         exotel_link = call_data.get('recording_url', 'N/A')
-        
-        # Transcript section removed - transcripts now go to NotebookLM only
+        recording_display = f"<{exotel_link}|Listen on Exotel>" if exotel_link != 'N/A' else 'None'
         
         # Main message body - clean and focused
-        message = f"""📞 *Customer Support Call Summary*
+        message = f"""{title_emoji} *{title_text}*
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -1057,13 +1056,11 @@ class SlackFormatter:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-📝 *Meeting Minutes (MOM):*
-
-{mom}
+{content_section}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🔗 *Call Recording:* <{exotel_link}|Listen on Exotel>
+🔗 *Call Recording:* {recording_display}
 🆔 *Call ID:* `{call_data['call_id']}`"""
         
         return {
@@ -1142,7 +1139,6 @@ def emergency_cleanup_old_records():
         logger.error(f"❌ Emergency cleanup failed: {e}")
 
 
-# Background processing with threading semaphore
 async def process_call_with_rate_limit(call_data: Dict[str, Any]):
     """Process call with rate limiting to prevent server overload"""
     call_id = call_data['call_id']
@@ -1151,94 +1147,93 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
     processing_semaphore.acquire()
     try:
         logger.info(f"[Queue] Starting processing for call {call_id}")
+        call_type = call_data.get('call_type', 'Normal')
         
-        # Check if recording URL is provided
-        recording_url = call_data.get('recording_url')
-        if not recording_url:
-            logger.warning(f"No recording URL for call {call_id}")
-            db_manager.mark_call_processed(call_data, "No recording available", False)
-            return
+        transcription = ""
+        mom = ""
         
-        # Download recording
-        logger.info(f"Downloading recording for call {call_id}")
-        audio_file = transcription_service.download_recording(recording_url, call_id)
+        # Determine if we should transcribe
+        should_transcribe = False
+        duration = call_data.get('duration', 0)
+
+        if call_type == "Normal":
+            should_transcribe = True
+        elif call_type == "Voicemail Call":
+            # Only transcribe voicemail if duration > 10 seconds
+            if duration > 10:
+                should_transcribe = True
+                logger.info(f"📼 Voicemail duration {duration}s > 10s. Proceeding with transcription.")
+            else:
+                transcription = f"Voicemail too short to transcribe ({duration}s)"
+                logger.info(f"⏭️ Voicemail duration {duration}s <= 10s. Skipping transcription.")
         
-        # Transcribe audio
-        logger.info(f"Transcribing call {call_id}")
-        transcription = transcription_service.transcribe_audio(audio_file)
-        
-        if not transcription or len(transcription.strip()) == 0:
-            raise Exception("Transcription returned empty text")
-        
-        logger.info(f"Transcription completed: {len(transcription)} characters")
-        
-        # Upload transcript to Google Drive for automatic NotebookLM sync
-        if google_drive_service:
+        # Perform transcription if criteria met
+        if should_transcribe:
+            # Check if recording URL is provided
+            recording_url = call_data.get('recording_url')
+            if recording_url:
+                # Download and transcribe
+                try:
+                    logger.info(f"Downloading recording for call {call_id}")
+                    audio_file = transcription_service.download_recording(recording_url, call_id)
+                    
+                    logger.info(f"Transcribing call {call_id}")
+                    transcription = transcription_service.transcribe_audio(audio_file)
+                    
+                    if not transcription:
+                        transcription = "No transcription possible."
+                except Exception as e:
+                    logger.error(f"Error in transcription: {e}")
+                    transcription = f"Error in transcription: {str(e)}"
+            else:
+                transcription = "No recording available."
+            
+            # Generate MOM only for Normal calls (Voicemails get transcript only)
+            if call_type == "Normal" and transcription and "Error" not in transcription:
+                # Get agent and customer information for MOM generation
+                agent_info = SlackFormatter.find_agent_from_call(
+                    call_data['from_number'],
+                    call_data['to_number']
+                )
+                
+                # Determine customer number based on agent detection
+                if agent_info:
+                    if agent_info['direction'] == "outgoing":
+                        customer_number = call_data['to_number']
+                    else:
+                        customer_number = call_data['from_number']
+                    agent_name = agent_info['name']
+                else:
+                    # Fallback
+                    customer_number = call_data['from_number']
+                    agent_name = "Agent"
+                
+                # For MOM generation, use simple labels
+                customer_name_for_mom = "Customer"
+                agent_name_for_mom = agent_name
+                
+                if mom_generator and transcription:
+                    logger.info(f"Generating MOM for call {call_id}")
+                    mom = mom_generator.generate_mom(transcription, customer_name=customer_name_for_mom, agent_name=agent_name_for_mom)
+                else:
+                    mom = transcription
+        else:
+            transcription = "N/A (Missed Call)"
+            mom = "N/A"
+
+        # Upload transcript to Google Drive for automatic NotebookLM sync (only if transcription exists and it's a normal call)
+        if google_drive_service and call_type == "Normal" and transcription and "N/A" not in transcription and "Error" not in transcription:
             logger.info(f"Uploading transcript to Google Drive for call {call_id}")
-            drive_success = google_drive_service.send_transcript(transcription, call_data)
-            if drive_success:
-                logger.info(f"✅ Transcript successfully uploaded to Google Drive")
-            else:
-                logger.warning(f"⚠️ Failed to upload transcript to Google Drive")
-        else:
-            logger.warning("Google Drive service not available - transcript not uploaded")
-        
-        # Get agent and customer information for MOM generation
-        agent_info = SlackFormatter.find_agent_from_call(
-            call_data['from_number'],
-            call_data['to_number']
-        )
-        
-        # Determine customer number based on agent detection
-        if agent_info:
-            if agent_info['direction'] == "outgoing":
-                customer_number = call_data['to_number']
-            else:
-                customer_number = call_data['from_number']
-            agent_name = agent_info['name']
-        else:
-            # Fallback: assume first number is customer
-            customer_number = call_data['from_number']
-            agent_name = "Agent"
-        
-        # Lookup customer name from Google Sheets (for Slack header only)
-        customer_details = customer_lookup.lookup_customer(customer_number)
-        if customer_details:
-            company_name = customer_details.get('company_name', 'Customer')
-            ca_name = customer_details.get('ca_name', '')
-            if ca_name:
-                customer_name_for_slack = f"{company_name} ({ca_name})"
-            else:
-                customer_name_for_slack = company_name
-        else:
-            customer_name_for_slack = "Name not found"
-        
-        # For MOM generation, use simple labels
-        customer_name_for_mom = "Customer"  # Simple label for Key Discussion Points
-        agent_name_for_mom = agent_name  # Keep agent name as-is
-        
-        logger.info(f"📝 MOM Generation Context:")
-        logger.info(f"   Customer (Slack): {customer_name_for_slack} ({customer_number})")
-        logger.info(f"   Customer (MOM): {customer_name_for_mom}")
-        logger.info(f"   Agent: {agent_name_for_mom}")
-        
-        # Generate MOM from transcription with simple customer label
-        if mom_generator:
-            logger.info(f"Generating MOM for call {call_id}")
-            mom = mom_generator.generate_mom(transcription, customer_name=customer_name_for_mom, agent_name=agent_name_for_mom)
-        else:
-            logger.warning("MOM generator not available, using transcription")
-            mom = transcription
+            google_drive_service.send_transcript(transcription, call_data)
         
         # BULLETPROOF DUPLICATE PREVENTION - Layer 3: Final safety check before Slack post
         if db_manager.is_call_processed(call_id):
             logger.warning(f"🚫 FINAL SAFETY CHECK: Call {call_id} already posted to Slack - SKIPPING DUPLICATE POST")
-            db_manager.mark_call_processed(call_data, transcription, True)  # Mark as processed without posting
             return
         
-        # Format and post to Slack (MOM only, no transcript)
-        logger.info(f"Formatting message for Slack")
-        slack_message_data = SlackFormatter.format_message(call_data, mom, "")
+        # Format and post to Slack
+        logger.info(f"Formatting message for Slack ({call_type})")
+        slack_message_data = SlackFormatter.format_message(call_data, mom, transcription)
         
         logger.info(f"Posting to Slack")
         success = SlackFormatter.post_to_slack(
@@ -1253,10 +1248,9 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
             logger.info(f"✅ Successfully completed processing for call {call_id}")
         else:
             logger.error(f"❌ Failed to post to Slack for call {call_id}")
-        
-        # Add delay before next call (rate limiting)
+            
+        # Add delay before next call
         if PROCESSING_DELAY > 0:
-            logger.info(f"⏸️ Waiting {PROCESSING_DELAY} seconds before next call...")
             await asyncio.sleep(PROCESSING_DELAY)
             
     except Exception as e:
@@ -1328,24 +1322,36 @@ async def health_check():
     }
 
 
+@app.post("/webhook/exotel", response_model=WebhookResponse)
 @app.post("/webhook/zapier", response_model=WebhookResponse)
-async def zapier_webhook(
-    payload: ZapierWebhookPayload,
+async def exotel_webhook(
+    payload: ExotelWebhookPayload,
     background_tasks: BackgroundTasks
 ):
-    """Main webhook endpoint for Zapier integration"""
+    """Main webhook endpoint for Exotel integration (formerly Zapier)"""
     try:
         call_id = payload.call_id
         logger.info(f"📞 Received webhook for call {call_id}")
         logger.info(f"   From: {payload.from_number}")
         logger.info(f"   To: {payload.to_number}")
+        logger.info(f"   Direction: {payload.direction}")
+        logger.info(f"   Price: {payload.price}")
         
+        # Identify Call Type
+        call_type = "Normal"
+        if payload.direction == "inbound":
+            # Missed Call: Direction inbound, No recording, Price 0 or null
+            if not payload.recording_url and (payload.price == 0 or payload.price is None):
+                call_type = "Missed Call"
+            # Voicemail Call: Direction inbound, Recording present, Price 0
+            elif payload.recording_url and payload.price == 0:
+                call_type = "Voicemail Call"
+        
+        logger.info(f"   Detected Call Type: {call_type}")
+
         # BULLETPROOF DUPLICATE PREVENTION - Layer 1: Quick existence check
         if db_manager.is_call_processed(call_id):
             logger.warning(f"🚫 PERMANENT DUPLICATE CALL DETECTED (Layer 1): {call_id}")
-            logger.warning(f"   From: {payload.from_number}")
-            logger.warning(f"   To: {payload.to_number}")
-            logger.warning(f"   BLOCKING: Call already posted to Slack (Zapier polling detected)")
             return WebhookResponse(
                 success=True,
                 message="Duplicate call - already posted to Slack (layer 1)",
@@ -1353,98 +1359,61 @@ async def zapier_webhook(
                 timestamp=datetime.utcnow().isoformat() + "Z"
             )
         
-        # TIME VALIDATION: Only process calls from last 1 hour (prevents duplicates from Zapier polling)
+        # TIME VALIDATION: Only process calls from last 1 hour
         try:
             call_date_str = payload.timestamp
             if call_date_str:
-                # Parse the call timestamp
-                # Handle both ISO format with Z and without timezone info
-                if 'Z' in call_date_str or '+' in call_date_str or call_date_str.count(':') == 3:
-                    # Has timezone info
+                if 'T' in call_date_str or '+' in call_date_str or call_date_str.count(':') == 3:
                     call_date = datetime.fromisoformat(call_date_str.replace('Z', '+00:00'))
                     call_time = call_date.replace(tzinfo=None)
+                elif ' ' in call_date_str:
+                    # Handle Exotel format: 2026-01-02 19:08:36
+                    call_time = datetime.strptime(call_date_str, '%Y-%m-%d %H:%M:%S')
                 else:
-                    # No timezone - assume it's already in UTC or local time
                     call_time = datetime.fromisoformat(call_date_str)
                 
                 current_time = datetime.utcnow()
-                
-                # Calculate time difference (absolute value to handle both past and future)
                 time_difference = current_time - call_time
                 time_difference_abs = abs(time_difference.total_seconds())
                 hours_diff = time_difference_abs / 3600
-                minutes_diff = time_difference_abs / 60
                 
-                # More lenient: Accept calls within ±6 hours (handles timezone issues)
-                # This allows for IST (+5:30), other timezones, and still filters old calls
                 if hours_diff > 6:
-                    if time_difference.total_seconds() > 0:
-                        # Old call
-                        logger.warning(f"🚫 OLD CALL REJECTED: {call_id}")
-                        logger.warning(f"   Call Time: {call_date_str}")
-                        logger.warning(f"   Current Time: {current_time.isoformat()}")
-                        logger.warning(f"   Age: {minutes_diff:.1f} minutes ({hours_diff:.2f} hours)")
-                        logger.warning(f"   BLOCKING: Call is older than 6 hours")
-                        return WebhookResponse(
-                            success=True,
-                            message=f"Call rejected - older than 6 hours ({hours_diff:.2f} hours old)",
-                            call_id=call_id,
-                            timestamp=datetime.utcnow().isoformat() + "Z"
-                        )
-                    else:
-                        # Future call (very wrong)
-                        logger.warning(f"🚫 FUTURE CALL REJECTED: {call_id}")
-                        logger.warning(f"   Call Time: {call_date_str}")
-                        logger.warning(f"   Current Time: {current_time.isoformat()}")
-                        logger.warning(f"   Time Ahead: {minutes_diff:.1f} minutes ({hours_diff:.2f} hours)")
-                        logger.warning(f"   BLOCKING: Call timestamp is too far in future")
-                        return WebhookResponse(
-                            success=True,
-                            message=f"Call rejected - timestamp too far in future ({hours_diff:.2f} hours)",
-                            call_id=call_id,
-                            timestamp=datetime.utcnow().isoformat() + "Z"
-                        )
-                else:
-                    logger.info(f"✅ Call time validated: {call_date_str} (within 6-hour window)")
+                    logger.warning(f"🚫 OLD/FUTURE CALL REJECTED: {call_id} (Diff: {hours_diff:.2f}h)")
+                    return WebhookResponse(
+                        success=True,
+                        message=f"Call rejected - time window error ({hours_diff:.2f} hours)",
+                        call_id=call_id,
+                        timestamp=datetime.utcnow().isoformat() + "Z"
+                    )
         except Exception as e:
             logger.warning(f"⚠️ Could not validate call timestamp: {e}")
-            logger.warning(f"   Call Timestamp: {payload.timestamp}")
-            # Continue processing if time validation fails
         
         if not SLACK_WEBHOOK_URL:
             raise HTTPException(status_code=500, detail="Slack webhook not configured")
         
-        if not transcription_service:
-            raise HTTPException(status_code=500, detail="Transcription service not configured")
+        # STRICT AGENT FILTER: Only process if at least one number matches an authorized agent
+        agent_info = SlackFormatter.find_agent_from_call(payload.from_number, payload.to_number)
         
-        # DEPARTMENT FILTER: Check if agent's department is allowed
-        if ALLOWED_DEPT_LIST:
-            # Detect agent from call numbers
-            agent_info = SlackFormatter.find_agent_from_call(
-                payload.from_number,
-                payload.to_number
+        if not agent_info:
+            logger.info(f"🚫 Skipping call {call_id} - Unauthorized numbers: From={payload.from_number}, To={payload.to_number}")
+            return WebhookResponse(
+                success=True,
+                message="Call skipped - Unauthorized agent numbers",
+                call_id=call_id,
+                timestamp=datetime.utcnow().isoformat() + "Z"
             )
-            
-            if agent_info:
-                agent_dept = agent_info.get('department', 'Unknown')
-                if agent_dept not in ALLOWED_DEPT_LIST:
-                    logger.info(f"🚫 Skipping call {call_id} - Agent department '{agent_dept}' not in allowed list")
-                    logger.info(f"   Allowed departments: {', '.join(ALLOWED_DEPT_LIST)}")
-                    logger.info(f"   Agent: {agent_info.get('name', 'Unknown')}")
-                    return WebhookResponse(
-                        success=True,
-                        message=f"Call skipped - Department '{agent_dept}' not in filter (allowed: {', '.join(ALLOWED_DEPT_LIST)})",
-                        call_id=call_id,
-                        timestamp=datetime.utcnow().isoformat() + "Z"
-                    )
-                else:
-                    logger.info(f"✅ Agent department '{agent_dept}' matches filter - processing call")
-            else:
-                logger.warning(f"⚠️ Could not detect agent for call {call_id} - skipping due to department filter")
-                logger.info(f"   From: {payload.from_number}, To: {payload.to_number}")
+        
+        agent_name = agent_info.get('name', 'Unknown')
+        logger.info(f"✅ Authorized agent detected: {agent_name}")
+
+        # DEPARTMENT FILTER (Legacy support, but primarily using the list provided)
+        if ALLOWED_DEPT_LIST:
+            agent_dept = agent_info.get('department', 'Unknown')
+            if agent_dept not in ALLOWED_DEPT_LIST:
+                logger.info(f"🚫 Skipping call {call_id} - Department '{agent_dept}' not allowed")
                 return WebhookResponse(
                     success=True,
-                    message="Call skipped - Agent not found in database (department filter active)",
+                    message=f"Call skipped - Dept filter",
                     call_id=call_id,
                     timestamp=datetime.utcnow().isoformat() + "Z"
                 )
@@ -1457,6 +1426,9 @@ async def zapier_webhook(
             'recording_url': payload.recording_url,
             'timestamp': payload.timestamp or datetime.utcnow().isoformat(),
             'status': payload.status,
+            'direction': payload.direction,
+            'price': payload.price,
+            'call_type': call_type,
             'agent_phone': payload.agent_phone,
             'agent_name': payload.agent_name,
             'agent_slack_handle': payload.agent_slack_handle,
@@ -1466,27 +1438,28 @@ async def zapier_webhook(
         
         # BULLETPROOF DUPLICATE PREVENTION - Layer 2: Database lock check
         if not db_manager.mark_call_processing(call_id, call_data):
-            logger.warning(f"🚫 DUPLICATE CALL DETECTED (Layer 2): {call_id}")
-            logger.warning(f"   From: {payload.from_number}")
-            logger.warning(f"   To: {payload.to_number}")
-            logger.warning(f"   BLOCKING: Call already exists (race condition prevented)")
             return WebhookResponse(
                 success=True,
-                message="Duplicate call - already exists (layer 2)",
+                message="Duplicate call - already processing (layer 2)",
                 call_id=call_id,
                 timestamp=datetime.utcnow().isoformat() + "Z"
             )
         
         background_tasks.add_task(process_call_background, call_data)
-        
-        logger.info(f"✅ Queued processing for call {call_id}")
+        logger.info(f"✅ Queued {call_type} for processing: {call_id}")
         
         return WebhookResponse(
             success=True,
-            message="Call queued for processing",
+            message=f"{call_type} queued for processing",
             call_id=call_id,
             timestamp=datetime.utcnow().isoformat() + "Z"
         )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in webhook handler: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
         
     except HTTPException:
         raise
