@@ -1325,11 +1325,19 @@ async def health_check():
 @app.post("/webhook/exotel", response_model=WebhookResponse)
 @app.post("/webhook/zapier", response_model=WebhookResponse)
 async def exotel_webhook(
-    payload: ExotelWebhookPayload,
+    request: Request,
     background_tasks: BackgroundTasks
 ):
     """Main webhook endpoint for Exotel integration (formerly Zapier)"""
     try:
+        # Get raw body for debugging
+        raw_body = await request.body()
+        logger.info(f"📥 Raw webhook body: {raw_body.decode('utf-8')}")
+        
+        # Parse and validate payload
+        body_json = await request.json()
+        payload = ExotelWebhookPayload(**body_json)
+        
         call_id = payload.call_id
         logger.info(f"📞 Received webhook for call {call_id}")
         logger.info(f"   From: {payload.from_number}")
