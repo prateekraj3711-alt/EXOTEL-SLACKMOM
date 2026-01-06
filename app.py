@@ -1411,7 +1411,20 @@ async def exotel_webhook(
             )
         
         agent_name = agent_info.get('name', 'Unknown')
-        logger.info(f"✅ Authorized agent detected: {agent_name}")
+        agent_team = agent_info.get('team', 'Support')
+        logger.info(f"✅ Authorized agent detected: {agent_name} ({agent_team})")
+
+        # CONDITIONAL PROCESSING FOR SUPPORT-CAND TEAM
+        # For Support-CAND agents, we ONLY process Missed Calls and Voicemail Calls.
+        # Normal calls are skipped to save costs/noise.
+        if agent_team == "Support-CAND" and call_type == "Normal":
+            logger.info(f"⏭️ Skipping Normal call for Support-CAND agent: {agent_name}")
+            return WebhookResponse(
+                success=True,
+                message=f"Normal call skipped for Support-CAND agent",
+                call_id=call_id,
+                timestamp=datetime.utcnow().isoformat() + "Z"
+            )
 
         # DEPARTMENT FILTER (Legacy support, but primarily using the list provided)
         if ALLOWED_DEPT_LIST:
