@@ -1330,12 +1330,11 @@ async def exotel_webhook(
 ):
     """Main webhook endpoint for Exotel integration (formerly Zapier)"""
     try:
-        # Get raw body for debugging
-        raw_body = await request.body()
-        logger.info(f"📥 Raw webhook body: {raw_body.decode('utf-8')}")
-        
-        # Parse and validate payload
+        # Parse JSON body
         body_json = await request.json()
+        logger.info(f"📥 Webhook body: {json.dumps(body_json, indent=2)}")
+        
+        # Validate payload
         payload = ExotelWebhookPayload(**body_json)
         
         call_id = payload.call_id
