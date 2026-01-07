@@ -1,7 +1,4 @@
 {
-  "_comment": "31 AUTHORIZED AGENTS - Strictly filtering calls for these numbers only",
-  "_instructions": "Phone numbers are normalized (digits only). System checks BOTH from_number and to_number against this database.",
-  
   "8126033006": {
     "name": "Syed Wali",
     "email": "syed.wali@springworks.in",
@@ -28,13 +25,13 @@
   },
   "8219834257": {
     "name": "Arsh Ahmed Chauhan",
-    "email": "arsh.chauhan@springverify.in",
+    "email": "arsh.chauhan@springworks.in",
     "department": "CUSTOMER SUPPORT",
     "team": "Support"
   },
   "9330818130": {
     "name": "Susmita Deb",
-    "email": "susmita.deb@springverify.in",
+    "email": "susmita.deb@springworks.in",
     "department": "CUSTOMER SUPPORT",
     "team": "Support"
   },
@@ -80,7 +77,6 @@
     "department": "CUSTOMER SUPPORT",
     "team": "Support"
   },
-  
   "6005065997": {
     "name": "Diksha Shah",
     "email": "diksha.shah@springworks.in",
