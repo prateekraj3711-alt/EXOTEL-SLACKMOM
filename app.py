@@ -41,6 +41,7 @@ app = FastAPI(
 
 # Configuration from environment
 SLACK_WEBHOOK_URL = os.environ.get('SLACK_WEBHOOK_URL')
+SLACK_MISSED_CALL_WEBHOOK_URL = os.environ.get('SLACK_MISSED_CALL_WEBHOOK_URL')
 SLACK_BOT_TOKEN = os.environ.get('SLACK_BOT_TOKEN')
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
@@ -1247,10 +1248,17 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
         logger.info(f"Formatting message for Slack ({call_type})")
         slack_message_data = SlackFormatter.format_message(call_data, mom, transcription)
         
+        # Determine Webhook URL based on Call Type
+        target_webhook_url = SLACK_WEBHOOK_URL
+        
+        if SLACK_MISSED_CALL_WEBHOOK_URL and (call_type == "Missed Call" or call_type == "Voicemail Call"):
+            target_webhook_url = SLACK_MISSED_CALL_WEBHOOK_URL
+            logger.info("🔀 Routing to Missed Call Channel")
+        
         logger.info(f"Posting to Slack")
         success = SlackFormatter.post_to_slack(
             message_data=slack_message_data,
-            webhook_url=SLACK_WEBHOOK_URL
+            webhook_url=target_webhook_url
         )
         
         # Mark as processed
