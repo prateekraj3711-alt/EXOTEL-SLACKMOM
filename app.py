@@ -43,12 +43,6 @@ app = FastAPI(
 SLACK_WEBHOOK_URL = os.environ.get('SLACK_WEBHOOK_URL')
 SLACK_MISSED_CALL_WEBHOOK_URL = os.environ.get('SLACK_MISSED_CALL_WEBHOOK_URL')
 SLACK_BOT_TOKEN = os.environ.get('SLACK_BOT_TOKEN')
-
-if SLACK_MISSED_CALL_WEBHOOK_URL:
-    logging.info("✅ Secondary Webhook found: SLACK_MISSED_CALL_WEBHOOK_URL is configured.")
-else:
-    logging.warning("⚠️ Secondary Webhook NOT found: SLACK_MISSED_CALL_WEBHOOK_URL is missing or empty.")
-
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
 GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET')
@@ -91,10 +85,21 @@ def load_agent_mapping():
 load_agent_mapping()
 
 # Pydantic Models
-# Helper: Search agent in database by phone number
-# Note: SlackFormatter.find_agent_from_call is already implemented above
-
 class ExotelWebhookPayload(BaseModel):
+    """Payload from Exotel webhook"""
+    call_id: str = Field(..., alias="Sid", description="Exotel Call ID (Sid)")
+    from_number: str = Field(..., alias="From", description="Caller number")
+    to_number: str = Field(..., alias="PhoneNumber", description="Called number")
+    duration: int = Field(0, alias="Duration", description="Call duration in seconds")
+    price: Optional[float] = Field(None, alias="Price", description="Call price")
+    direction: str = Field(..., alias="Direction", description="Call direction (inbound/outbound)")
+    recording_url: Optional[str] = Field(None, alias="RecordingUrl", description="Recording URL from Exotel")
+    timestamp: Optional[str] = Field(None, alias="StartTime", description="Call timestamp")
+    status: str = Field(default="completed", alias="Status", description="Call status")
+    
+    # Optional fields that might be present
+    agent_phone: Optional[str] = Field(None, description="Agent phone number")
+    agent_name: Optional[str] = Field(None, description="Agent name")
     agent_slack_handle: Optional[str] = Field(None, description="Agent Slack handle")
     department: str = Field(default="Customer Success", description="Department")
     customer_segment: str = Field(default="General", description="Customer segment")
@@ -1246,13 +1251,9 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
         # Determine Webhook URL based on Call Type
         target_webhook_url = SLACK_WEBHOOK_URL
         
-        logger.info(f"🔍 Routing Debug: Type='{call_type}', SecondaryURL={'Set' if SLACK_MISSED_CALL_WEBHOOK_URL else 'Not Set'}")
-        
         if SLACK_MISSED_CALL_WEBHOOK_URL and (call_type == "Missed Call" or call_type == "Voicemail Call"):
             target_webhook_url = SLACK_MISSED_CALL_WEBHOOK_URL
-            logger.info("🔀 Decision: Routing to MISSED CALL Channel")
-        else:
-            logger.info("➡️ Decision: Routing to MAIN Channel")
+            logger.info("🔀 Routing to Missed Call Channel")
         
         logger.info(f"Posting to Slack")
         success = SlackFormatter.post_to_slack(
