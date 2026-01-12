@@ -1374,6 +1374,7 @@ async def exotel_webhook(
             elif payload.recording_url and payload.price == 0:
                 call_type = "Voicemail Call"
         
+        logger.info(f"   Detection Debug: Direction={payload.direction}, RecURL={'Present' if payload.recording_url else 'None'}, Price={payload.price}")
         logger.info(f"   Detected Call Type: {call_type}")
 
         # BULLETPROOF DUPLICATE PREVENTION - Layer 1: Quick existence check
