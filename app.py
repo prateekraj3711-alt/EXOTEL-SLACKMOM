@@ -1231,7 +1231,7 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
                 else:
                     mom = transcription
         else:
-            transcription = "N/A (Missed Call)"
+            transcription = "Voicemail (Check Link)"
             mom = "N/A"
 
         # Upload transcript to Google Drive for automatic NotebookLM sync (only if transcription exists and it's a normal call)
@@ -1251,9 +1251,9 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
         # Determine Webhook URL based on Call Type
         target_webhook_url = SLACK_WEBHOOK_URL
         
-        if SLACK_MISSED_CALL_WEBHOOK_URL and (call_type == "Missed Call" or call_type == "Voicemail Call"):
-            target_webhook_url = SLACK_MISSED_CALL_WEBHOOK_URL
-            logger.info("🔀 Routing to Missed Call Channel")
+        if call_type == "Voicemail Call" and SLACK_MISSED_CALL_WEBHOOK_URL:
+             target_webhook_url = SLACK_MISSED_CALL_WEBHOOK_URL
+             logger.info("🔀 Routing to Missed Call Channel (Voicemail)")
         
         logger.info(f"Posting to Slack")
         success = SlackFormatter.post_to_slack(
@@ -1367,11 +1367,11 @@ async def exotel_webhook(
         # Identify Call Type
         call_type = "Normal"
         if payload.direction == "inbound":
-            # Missed Call: Direction inbound, No recording, Price 0 or null
-            if not payload.recording_url and (payload.price == 0 or payload.price is None):
-                call_type = "Missed Call"
+            # REMOVED Missed Call Logic per user request
+            # We ONLY care about Voicemail calls (Price 0 + Recording) or Normal calls
+            
             # Voicemail Call: Direction inbound, Recording present, Price 0
-            elif payload.recording_url and payload.price == 0:
+            if payload.recording_url and (payload.price == 0 or payload.price is None):
                 call_type = "Voicemail Call"
         
         logger.info(f"   Detection Debug: Direction={payload.direction}, RecURL={'Present' if payload.recording_url else 'None'}, Price={payload.price}")
