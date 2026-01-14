@@ -1251,9 +1251,10 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
         # Determine Webhook URL based on Call Type
         target_webhook_url = SLACK_WEBHOOK_URL
         
-        if call_type == "Voicemail Call" and SLACK_MISSED_CALL_WEBHOOK_URL:
-             target_webhook_url = SLACK_MISSED_CALL_WEBHOOK_URL
-             logger.info("🔀 Routing to Missed Call Channel (Voicemail)")
+        # Route all calls to main channel per user request
+        # if call_type == "Voicemail Call" and SLACK_MISSED_CALL_WEBHOOK_URL:
+        #      target_webhook_url = SLACK_MISSED_CALL_WEBHOOK_URL
+        #      logger.info("🔀 Routing to Missed Call Channel (Voicemail)")
         
         logger.info(f"Posting to Slack")
         success = SlackFormatter.post_to_slack(
