@@ -1375,12 +1375,19 @@ async def exotel_webhook(
         # Identify Call Type
         call_type = "Normal"
         if payload.direction == "inbound":
-            # REMOVED Missed Call Logic per user request
-            # We ONLY care about Voicemail calls (Price 0 + Recording) or Normal calls
+            # STRICT FILTER: All inbound calls MUST have a recording AND be > 10 seconds
+            if not payload.recording_url or payload.duration <= 10:
+                logger.info(f"⏭️ Skipping Inbound Call {call_id} - Duration {payload.duration}s <= 10s or No Recording")
+                return WebhookResponse(
+                    success=True,
+                    message="Skipped - Short/No Recording Inbound Call",
+                    call_id=call_id,
+                    timestamp=datetime.utcnow().isoformat() + "Z"
+                )
             
-            # Voicemail Call: Direction inbound, Recording present, Price 0
-            if payload.recording_url and (payload.price == 0 or payload.price is None):
-                call_type = "Voicemail Call"
+            # If it passed the filter, it has a recording -> Treat as Voicemail Call (per user request)
+            # "Voicemail Call just strictly recording presence, ignoring price."
+            call_type = "Voicemail Call"
         
         logger.info(f"   Detection Debug: Direction={payload.direction}, RecURL={'Present' if payload.recording_url else 'None'}, Price={payload.price}")
         logger.info(f"   Detected Call Type: {call_type}")
