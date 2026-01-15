@@ -1159,13 +1159,6 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
     # Acquire semaphore (wait if max concurrent calls reached)
     processing_semaphore.acquire()
     try:
-        # BULLETPROOF DUPLICATE PREVENTION - Layer 2: Processing Lock
-        # We attempt to mark the call as 'processing'. If it returns False, it means
-        # the call is already being processed OR has already been completed.
-        if not db_manager.mark_call_processing(call_id, call_data):
-            logger.warning(f"🚫 DUPLICATE PROCESSING BLOCKED: {call_id} is already in progress or done.")
-            return
-
         logger.info(f"[Queue] Starting processing for call {call_id}")
         call_type = call_data.get('call_type', 'Normal')
         
