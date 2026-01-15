@@ -89,7 +89,16 @@ class ExotelWebhookPayload(BaseModel):
     """Payload from Exotel webhook"""
     call_id: str = Field(..., alias="Sid", description="Exotel Call ID (Sid)")
     from_number: str = Field(..., alias="From", description="Caller number")
-    to_number: str = Field(..., alias="PhoneNumber", description="Called number")
+    
+    # Capture both 'To' and 'PhoneNumber' separately
+    # 'To' is often the destination (Customer in outbound, VN/Agent in inbound)
+    exotel_to: Optional[str] = Field(None, alias="To", description="Exotel 'To' field")
+    
+    # 'PhoneNumber' is usually the Virtual Number
+    # We map this to 'to_number' for backward compatibility in the rest of the code,
+    # but we will check ALL fields for agent matching.
+    to_number: str = Field(..., alias="PhoneNumber", description="Called number (Virtual Number)")
+    
     duration: int = Field(0, alias="Duration", description="Call duration in seconds")
     price: Optional[float] = Field(None, alias="Price", description="Call price")
     direction: str = Field(..., alias="Direction", description="Call direction (inbound/outbound)")
@@ -873,72 +882,56 @@ class SlackFormatter:
         return normalized
     
     @staticmethod
-    def find_agent_from_call(from_number: str, to_number: str) -> Optional[Dict[str, str]]:
+    def find_agent_from_call(from_number: str, to_number: str, extra_number: str = None) -> Optional[Dict[str, str]]:
         """
         SMART AGENT DETECTION:
-        Check both from_number and to_number against authorized agent database ONLY.
+        Check from_number, to_number, and extra_number against authorized agent database.
         Returns agent info if found, None otherwise.
         """
-        from_clean = SlackFormatter.normalize_phone(from_number)
-        to_clean = SlackFormatter.normalize_phone(to_number)
+        candidates = [
+            (from_number, "outgoing"),  # If from matches, agent is caller (outgoing)
+            (to_number, "incoming"),    # If to matches, agent is receiver (incoming)
+        ]
+        if extra_number:
+            candidates.append((extra_number, "incoming")) # Treat extra number match as agent receiving
+
+        logger.debug(f"🔍 Checking for agent match in: {candidates}")
         
-        logger.debug(f"🔍 Checking for agent match: From={from_clean}, To={to_clean}")
-        
-        # Check agent_mapping.json database (31 authorized agents)
+        # Check agent_mapping.json database
         for mapped_phone, agent_data in AGENT_MAPPING.items():
             mapped_clean = SlackFormatter.normalize_phone(mapped_phone)
             
-            # Check if from_number matches (Agent is caller)
-            if mapped_clean == from_clean:
-                email = agent_data.get('email', '')
-                name = agent_data.get('name', 'Support Agent')
+            for candidate_phone, direction in candidates:
+                if not candidate_phone:
+                    continue
+                    
+                candidate_clean = SlackFormatter.normalize_phone(candidate_phone)
                 
-                # Try to enrich with Slack info if available
-                slack_mention = f"📧 {email}" if email else "@support"
-                user_id = ""
-                if slack_user_lookup:
-                    slack_user = slack_user_lookup.get_user_by_phone(from_number)
-                    if slack_user:
-                        user_id = slack_user.get('user_id', '')
-                        slack_mention = f"<@{user_id}>" if user_id else slack_mention
+                if mapped_clean == candidate_clean:
+                    email = agent_data.get('email', '')
+                    name = agent_data.get('name', 'Support Agent')
+                    
+                    # Try to enrich with Slack info if available
+                    slack_mention = f"📧 {email}" if email else "@support"
+                    user_id = ""
+                    if slack_user_lookup:
+                        # try looking up by the matched phone
+                        slack_user = slack_user_lookup.get_user_by_phone(mapped_phone)
+                        if slack_user:
+                            user_id = slack_user.get('user_id', '')
+                            slack_mention = f"<@{user_id}>" if user_id else slack_mention
 
-                logger.info(f"✅ Found authorized agent (from_number): {name}")
-                return {
-                    "phone": from_number,
-                    "name": name,
-                    "slack_mention": slack_mention,
-                    "email": email,
-                    "user_id": user_id,
-                    "department": agent_data.get('department', 'CUSTOMER SUPPORT'),
-                    "team": agent_data.get('team', 'Support'),
-                    "direction": "outgoing"
-                }
-            
-            # Check if to_number matches (Agent is receiver)
-            if mapped_clean == to_clean:
-                email = agent_data.get('email', '')
-                name = agent_data.get('name', 'Support Agent')
-                
-                # Try to enrich with Slack info if available
-                slack_mention = f"📧 {email}" if email else "@support"
-                user_id = ""
-                if slack_user_lookup:
-                    slack_user = slack_user_lookup.get_user_by_phone(to_number)
-                    if slack_user:
-                        user_id = slack_user.get('user_id', '')
-                        slack_mention = f"<@{user_id}>" if user_id else slack_mention
-
-                logger.info(f"✅ Found authorized agent (to_number): {name}")
-                return {
-                    "phone": to_number,
-                    "name": name,
-                    "slack_mention": slack_mention,
-                    "email": email,
-                    "user_id": user_id,
-                    "department": agent_data.get('department', 'CUSTOMER SUPPORT'),
-                    "team": agent_data.get('team', 'Support'),
-                    "direction": "incoming"
-                }
+                    logger.info(f"✅ Found authorized agent ({candidate_phone}): {name}")
+                    return {
+                        "phone": candidate_phone,
+                        "name": name,
+                        "slack_mention": slack_mention,
+                        "email": email,
+                        "user_id": user_id,
+                        "department": agent_data.get('department', 'CUSTOMER SUPPORT'),
+                        "team": agent_data.get('team', 'Support'),
+                        "direction": direction
+                    }
         
         return None
     
@@ -951,7 +944,8 @@ class SlackFormatter:
         # SMART DETECTION: Find which number belongs to support agent
         agent_info = SlackFormatter.find_agent_from_call(
             call_data['from_number'],
-            call_data['to_number']
+            call_data['to_number'],
+            call_data.get('exotel_to')
         )
         
         if agent_info:
@@ -1206,7 +1200,8 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
                 # Get agent and customer information for MOM generation
                 agent_info = SlackFormatter.find_agent_from_call(
                     call_data['from_number'],
-                    call_data['to_number']
+                    call_data['to_number'],
+                    call_data.get('exotel_to')
                 )
                 
                 # Determine customer number based on agent detection
@@ -1427,8 +1422,15 @@ async def exotel_webhook(
         if not SLACK_WEBHOOK_URL:
             raise HTTPException(status_code=500, detail="Slack webhook not configured")
         
+        logger.info(f"   To (Field): {payload.exotel_to}")
+        
         # STRICT AGENT FILTER: Only process if at least one number matches an authorized agent
-        agent_info = SlackFormatter.find_agent_from_call(payload.from_number, payload.to_number)
+        # We check: From (Caller), PhoneNumber (Virtual Number), and To (Exotel Dialed)
+        agent_info = SlackFormatter.find_agent_from_call(
+            payload.from_number, 
+            payload.to_number,
+            payload.exotel_to
+        )
         
         if not agent_info:
             logger.info(f"🚫 Skipping call {call_id} - Unauthorized numbers: From={payload.from_number}, To={payload.to_number}")
