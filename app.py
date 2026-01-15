@@ -99,6 +99,9 @@ class ExotelWebhookPayload(BaseModel):
     # but we will check ALL fields for agent matching.
     to_number: str = Field(..., alias="PhoneNumber", description="Called number (Virtual Number)")
     
+    # User requested to check PhoneNumberSid as well (sometimes contains number)
+    phone_number_sid: Optional[str] = Field(None, alias="PhoneNumberSid", description="Phone Number SID")
+
     duration: int = Field(0, alias="Duration", description="Call duration in seconds")
     price: Optional[float] = Field(None, alias="Price", description="Call price")
     direction: str = Field(..., alias="Direction", description="Call direction (inbound/outbound)")
@@ -882,10 +885,10 @@ class SlackFormatter:
         return normalized
     
     @staticmethod
-    def find_agent_from_call(from_number: str, to_number: str, extra_number: str = None) -> Optional[Dict[str, str]]:
+    def find_agent_from_call(from_number: str, to_number: str, extra_number: str = None, phone_number_sid: str = None) -> Optional[Dict[str, str]]:
         """
         SMART AGENT DETECTION:
-        Check from_number, to_number, and extra_number against authorized agent database.
+        Check from_number, to_number, extra_number, and phone_number_sid against authorized agent database.
         Returns agent info if found, None otherwise.
         """
         candidates = [
@@ -893,7 +896,9 @@ class SlackFormatter:
             (to_number, "incoming"),    # If to matches, agent is receiver (incoming)
         ]
         if extra_number:
-            candidates.append((extra_number, "incoming")) # Treat extra number match as agent receiving
+            candidates.append((extra_number, "incoming")) 
+        if phone_number_sid:
+            candidates.append((phone_number_sid, "incoming"))
 
         logger.debug(f"🔍 Checking for agent match in: {candidates}")
         
@@ -945,7 +950,8 @@ class SlackFormatter:
         agent_info = SlackFormatter.find_agent_from_call(
             call_data['from_number'],
             call_data['to_number'],
-            call_data.get('exotel_to')
+            call_data.get('exotel_to'),
+            call_data.get('phone_number_sid')
         )
         
         if agent_info:
@@ -1201,7 +1207,8 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
                 agent_info = SlackFormatter.find_agent_from_call(
                     call_data['from_number'],
                     call_data['to_number'],
-                    call_data.get('exotel_to')
+                    call_data.get('exotel_to'),
+                    call_data.get('phone_number_sid')
                 )
                 
                 # Determine customer number based on agent detection
@@ -1425,15 +1432,16 @@ async def exotel_webhook(
         logger.info(f"   To (Field): {payload.exotel_to}")
         
         # STRICT AGENT FILTER: Only process if at least one number matches an authorized agent
-        # We check: From (Caller), PhoneNumber (Virtual Number), and To (Exotel Dialed)
+        # We check: From (Caller), PhoneNumber (Virtual Number), To (Exotel Dialed), PhoneNumberSid
         agent_info = SlackFormatter.find_agent_from_call(
             payload.from_number, 
             payload.to_number,
-            payload.exotel_to
+            payload.exotel_to,
+            payload.phone_number_sid
         )
         
         if not agent_info:
-            logger.info(f"🚫 Skipping call {call_id} - Unauthorized numbers: From={payload.from_number}, To={payload.to_number}")
+            logger.info(f"🚫 Skipping call {call_id} - Unauthorized numbers: From={payload.from_number}, To={payload.to_number}, PNSid={payload.phone_number_sid}")
             return WebhookResponse(
                 success=True,
                 message="Call skipped - Unauthorized agent numbers",
