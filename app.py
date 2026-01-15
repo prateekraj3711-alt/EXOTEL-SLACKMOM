@@ -94,10 +94,8 @@ class ExotelWebhookPayload(BaseModel):
     # 'To' is often the destination (Customer in outbound, VN/Agent in inbound)
     exotel_to: Optional[str] = Field(None, alias="To", description="Exotel 'To' field")
     
-    # 'PhoneNumber' is usually the Virtual Number
-    # We map this to 'to_number' for backward compatibility in the rest of the code,
-    # but we will check ALL fields for agent matching.
-    to_number: str = Field(..., alias="PhoneNumber", description="Called number (Virtual Number)")
+    # 'PhoneNumber' is usually the Virtual Number, but we treat it as just another source to check.
+    to_number: str = Field(..., alias="PhoneNumber", description="Called number (PhoneNumber field)")
     
     # User requested to check PhoneNumberSid as well (sometimes contains number)
     phone_number_sid: Optional[str] = Field(None, alias="PhoneNumberSid", description="Phone Number SID")
