@@ -1519,17 +1519,7 @@ async def exotel_webhook(
                 timestamp=datetime.utcnow().isoformat() + "Z"
             )
 
-        # DEPARTMENT FILTER (Legacy support, but primarily using the list provided)
-        if ALLOWED_DEPT_LIST:
-            agent_dept = agent_info.get('department', 'Unknown')
-            if agent_dept not in ALLOWED_DEPT_LIST:
-                logger.info(f"🚫 Skipping call {call_id} - Department '{agent_dept}' not allowed")
-                return WebhookResponse(
-                    success=True,
-                    message=f"Call skipped - Dept filter",
-                    call_id=call_id,
-                    timestamp=datetime.utcnow().isoformat() + "Z"
-                )
+        # DEPARTMENT FILTER removed - authorization now handled in call type detection
         
         call_data = {
             'call_id': call_id,
