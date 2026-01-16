@@ -1368,10 +1368,81 @@ async def exotel_webhook(
         logger.info(f"   Direction: {payload.direction}")
         logger.info(f"   Price: {payload.price}")
         
-        # Identify Call Type
-        call_type = "Normal"
+        # Define virtual number for Customer Support
+        VIRTUAL_NUMBER = "08047190155"
+        
+        # Helper function to normalize phone numbers for comparison
+        def normalize_for_comparison(phone: str) -> str:
+            if not phone:
+                return ""
+            normalized = phone.replace('+', '').replace('-', '').replace(' ', '').replace('(', '').replace(')', '')
+            # Remove country code +91
+            if normalized.startswith('91') and len(normalized) == 12:
+                normalized = normalized[2:]
+            # Remove leading 0
+            if normalized.startswith('0') and len(normalized) == 11:
+                normalized = normalized[1:]
+            return normalized
+        
+        # Collect all phone fields and normalize them
+        all_fields = [
+            normalize_for_comparison(payload.from_number),
+            normalize_for_comparison(payload.to_number),
+            normalize_for_comparison(payload.phone_number) if payload.phone_number else "",
+            normalize_for_comparison(payload.phone_number_sid) if payload.phone_number_sid else ""
+        ]
+        
+        # Normalize virtual number for comparison
+        normalized_virtual = normalize_for_comparison(VIRTUAL_NUMBER)
+        
+        # Count how many fields contain the virtual number
+        virtual_count = sum(1 for field in all_fields if field and field == normalized_virtual)
+        
+        # Check if any field contains an agent number
+        has_agent_number = False
+        for field in all_fields:
+            if field:
+                # Check against all 13 agent numbers
+                for agent_phone in AGENT_MAPPING.keys():
+                    if normalize_for_comparison(agent_phone) == field:
+                        has_agent_number = True
+                        break
+            if has_agent_number:
+                break
+        
+        # NEW CALL TYPE DETECTION LOGIC
+        call_type = None
+        
+        # Rule 1: If virtual number appears in 2+ fields → Voicemail
+        if virtual_count >= 2:
+            call_type = "Voicemail Call"
+            logger.info(f"   📠 Virtual number found in {virtual_count} fields → Voicemail Call")
+        
+        # Rule 2: If has agent number + virtual number + status=completed → Normal
+        elif has_agent_number and virtual_count >= 1 and payload.status == "completed":
+            call_type = "Normal"
+            logger.info(f"   📞 Agent number + Virtual number + Completed → Normal Call")
+        
+        # Rule 3: Skip if doesn't match either pattern
+        else:
+            skip_reason = []
+            if not has_agent_number:
+                skip_reason.append("No agent number")
+            if virtual_count == 0:
+                skip_reason.append("No virtual number")
+            if payload.status != "completed":
+                skip_reason.append(f"Status={payload.status}")
+            
+            logger.info(f"⏭️ Skipping call {call_id} - {', '.join(skip_reason)}")
+            return WebhookResponse(
+                success=True,
+                message=f"Skipped - {', '.join(skip_reason)}",
+                call_id=call_id,
+                timestamp=datetime.utcnow().isoformat() + "Z"
+            )
+        
+        # Additional filter for inbound calls: must have recording and duration > 10s
         if payload.direction == "inbound":
-            # STRICT FILTER: All inbound calls MUST have a recording AND be > 10 seconds
             if not payload.recording_url or payload.duration <= 10:
                 logger.info(f"⏭️ Skipping Inbound Call {call_id} - Duration {payload.duration}s <= 10s or No Recording")
                 return WebhookResponse(
@@ -1380,10 +1451,6 @@ async def exotel_webhook(
                     call_id=call_id,
                     timestamp=datetime.utcnow().isoformat() + "Z"
                 )
-            
-            # If it passed the filter, it has a recording -> Treat as Voicemail Call (per user request)
-            # "Voicemail Call just strictly recording presence, ignoring price."
-            call_type = "Voicemail Call"
         
         logger.info(f"   Detection Debug: Direction={payload.direction}, RecURL={'Present' if payload.recording_url else 'None'}, Price={payload.price}")
         logger.info(f"   Detected Call Type: {call_type}")
