@@ -1503,23 +1503,24 @@ async def exotel_webhook(
         # Authorization is now handled in the call type detection logic above
         # Calls reach this point only if they passed the virtual number / agent number checks
         
-        agent_name = "Unknown"
-        agent_team = "Support"
-        logger.info(f"✅ Authorized agent detected: {agent_name} ({agent_team})")
+        # Try to identify the specific agent from the 13-agent list
+        agent_info = SlackFormatter.find_agent_from_call(
+            payload.from_number, 
+            payload.to_number,
+            payload.exotel_to,
+            payload.phone_number_sid
+        )
+        
+        if agent_info:
+            agent_name = agent_info.get('name', 'Unknown')
+            agent_team = agent_info.get('team', 'Support')
+            logger.info(f"✅ Identified agent: {agent_name} ({agent_team})")
+        else:
+            # For voicemail calls without agent match, use default
+            agent_name = "Unknown"
+            agent_team = "Support"
+            logger.info(f"✅ Processing call (no specific agent identified)")
 
-        # CONDITIONAL PROCESSING FOR SUPPORT-CAND TEAM
-        # For Support-CAND agents, we ONLY process Missed Calls and Voicemail Calls.
-        # Normal calls are skipped to save costs/noise.
-        if agent_team == "Support-CAND" and call_type == "Normal":
-            logger.info(f"⏭️ Skipping Normal call for Support-CAND agent: {agent_name}")
-            return WebhookResponse(
-                success=True,
-                message=f"Normal call skipped for Support-CAND agent",
-                call_id=call_id,
-                timestamp=datetime.utcnow().isoformat() + "Z"
-            )
-
-        # DEPARTMENT FILTER removed - authorization now handled in call type detection
         
         call_data = {
             'call_id': call_id,
