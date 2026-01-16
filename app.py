@@ -1500,26 +1500,11 @@ async def exotel_webhook(
         
         logger.info(f"   To (Field): {payload.exotel_to}")
         
-        # STRICT AGENT FILTER: Only process if at least one number matches an authorized agent
-        # We check: From (Caller), PhoneNumber (Virtual Number), To (Exotel Dialed), PhoneNumberSid
-        agent_info = SlackFormatter.find_agent_from_call(
-            payload.from_number, 
-            payload.to_number,
-            payload.exotel_to,
-            payload.phone_number_sid
-        )
+        # Authorization is now handled in the call type detection logic above
+        # Calls reach this point only if they passed the virtual number / agent number checks
         
-        if not agent_info:
-            logger.info(f"🚫 Skipping call {call_id} - Unauthorized numbers: From={payload.from_number}, To={payload.to_number}, PNSid={payload.phone_number_sid}")
-            return WebhookResponse(
-                success=True,
-                message="Call skipped - Unauthorized agent numbers",
-                call_id=call_id,
-                timestamp=datetime.utcnow().isoformat() + "Z"
-            )
-        
-        agent_name = agent_info.get('name', 'Unknown')
-        agent_team = agent_info.get('team', 'Support')
+        agent_name = "Unknown"
+        agent_team = "Support"
         logger.info(f"✅ Authorized agent detected: {agent_name} ({agent_team})")
 
         # CONDITIONAL PROCESSING FOR SUPPORT-CAND TEAM
