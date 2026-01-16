@@ -1413,7 +1413,8 @@ async def exotel_webhook(
                 time_difference_abs = abs(time_difference.total_seconds())
                 hours_diff = time_difference_abs / 3600
                 
-                if hours_diff > 6:
+                # Relaxed Check: 365 Days (8760 hours)
+                if hours_diff > 8760: 
                     logger.warning(f"🚫 OLD/FUTURE CALL REJECTED: {call_id} (Diff: {hours_diff:.2f}h)")
                     return WebhookResponse(
                         success=True,
