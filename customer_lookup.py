@@ -100,29 +100,35 @@ class CustomerLookup:
             
             for record in records:
                 ca_mobile = str(record.get('CA Mobile', '')).strip()
+                ca_name_raw = str(record.get('CA Name', '')).strip()
                 company_name = str(record.get('Company Name', '')).strip()
                 
                 if ca_mobile and company_name:
-                    # CA Mobile can have multiple numbers separated by commas
+                    # CA Mobile and CA Name can have multiple entries separated by commas
                     phone_numbers = [p.strip() for p in ca_mobile.split(',')]
+                    ca_names = [n.strip() for n in ca_name_raw.split(',')]
                     
-                    customer_details = {
-                        'company_id': str(record.get('Company ID', '')),
-                        'company_name': company_name,
-                        'company_status': str(record.get('Company Status', '')),
-                        'ca_name': str(record.get('CA Name', '')),
-                        'ca_email': str(record.get('CA Email', '')),
-                        'ca_mobile': ca_mobile,
-                        'original_phone': ca_mobile
-                    }
-                    
-                    # Add each phone number to cache
-                    for phone in phone_numbers:
+                    # Create individual mappings for each phone number with its corresponding CA name
+                    for idx, phone in enumerate(phone_numbers):
                         if phone:  # Skip empty strings
+                            # Get the corresponding CA name (if available)
+                            # If there are fewer names than numbers, use the last name or empty string
+                            ca_name_for_phone = ca_names[idx] if idx < len(ca_names) else (ca_names[-1] if ca_names else '')
+                            
+                            customer_details = {
+                                'company_id': str(record.get('Company ID', '')),
+                                'company_name': company_name,
+                                'company_status': str(record.get('Company Status', '')),
+                                'ca_name': ca_name_for_phone,  # Only the specific CA name for this phone
+                                'ca_email': str(record.get('CA Email', '')),
+                                'ca_mobile': phone,  # Only this specific phone number
+                                'original_phone': phone
+                            }
+                            
                             clean_number = self.normalize_phone(phone)
                             self.cache[clean_number] = customer_details
                             phone_count += 1
-                            logger.debug(f"  📞 Cached: {phone} → {company_name}")
+                            logger.debug(f"  📞 Cached: {phone} → {company_name} ({ca_name_for_phone})")
             
             self.cache_loaded = True
             self.last_cache_refresh = datetime.utcnow()  # Record refresh time
