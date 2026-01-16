@@ -1057,10 +1057,10 @@ class SlackFormatter:
 *Customer Details*
 • Name: {customer_legal_name}
 • Number: `{customer_number}`
-• Support Line: `{support_number}`
 
 *Agent Details*
 • Agent: {agent_name} {agent_mention}
+• Number: `{support_number}`
 • Department: {department}
 
 *Call Duration & Time*
