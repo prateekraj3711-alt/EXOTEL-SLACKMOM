@@ -1503,23 +1503,29 @@ async def exotel_webhook(
         # Authorization is now handled in the call type detection logic above
         # Calls reach this point only if they passed the virtual number / agent number checks
         
-        # Try to identify the specific agent from the 13-agent list
-        agent_info = SlackFormatter.find_agent_from_call(
-            payload.from_number, 
-            payload.to_number,
-            payload.exotel_to,
-            payload.phone_number_sid
-        )
-        
-        if agent_info:
-            agent_name = agent_info.get('name', 'Unknown')
-            agent_team = agent_info.get('team', 'Support')
-            logger.info(f"✅ Identified agent: {agent_name} ({agent_team})")
-        else:
-            # For voicemail calls without agent match, use default
-            agent_name = "Unknown"
+        # For voicemail calls, agent is N/A (customer-initiated, no agent involved)
+        # For normal calls, try to identify the specific agent from the 13-agent list
+        if call_type == "Voicemail Call":
+            agent_name = "N/A"
             agent_team = "Support"
-            logger.info(f"✅ Processing call (no specific agent identified)")
+            logger.info(f"✅ Processing voicemail call (Agent: N/A)")
+        else:
+            # Normal call - identify the agent
+            agent_info = SlackFormatter.find_agent_from_call(
+                payload.from_number, 
+                payload.to_number,
+                payload.exotel_to,
+                payload.phone_number_sid
+            )
+            
+            if agent_info:
+                agent_name = agent_info.get('name', 'Unknown')
+                agent_team = agent_info.get('team', 'Support')
+                logger.info(f"✅ Identified agent: {agent_name} ({agent_team})")
+            else:
+                agent_name = "Unknown"
+                agent_team = "Support"
+                logger.info(f"✅ Processing call (no specific agent identified)")
 
         
         call_data = {
