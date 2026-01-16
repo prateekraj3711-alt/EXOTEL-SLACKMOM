@@ -1230,6 +1230,9 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
                     mom = mom_generator.generate_mom(transcription, customer_name=customer_name_for_mom, agent_name=agent_name_for_mom)
                 else:
                     mom = transcription
+            else:
+                # For voicemail calls, use the transcription directly (no MOM generation)
+                mom = transcription if transcription and "Error" not in transcription else "N/A"
         else:
             transcription = "Voicemail (Check Link)"
             mom = "N/A"
