@@ -1491,7 +1491,9 @@ async def exotel_webhook(
             'agent_name': payload.agent_name,
             'agent_slack_handle': payload.agent_slack_handle,
             'department': payload.department,
-            'customer_segment': payload.customer_segment
+            'customer_segment': payload.customer_segment,
+            'exotel_to': payload.exotel_to,
+            'phone_number_sid': payload.phone_number_sid
         }
         
         # BULLETPROOF DUPLICATE PREVENTION - Layer 2: Database lock check
