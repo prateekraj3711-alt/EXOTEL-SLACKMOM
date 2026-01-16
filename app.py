@@ -1388,7 +1388,7 @@ async def exotel_webhook(
         all_fields = [
             normalize_for_comparison(payload.from_number),
             normalize_for_comparison(payload.to_number),
-            normalize_for_comparison(payload.phone_number) if payload.phone_number else "",
+            normalize_for_comparison(payload.exotel_to) if payload.exotel_to else "",
             normalize_for_comparison(payload.phone_number_sid) if payload.phone_number_sid else ""
         ]
         
