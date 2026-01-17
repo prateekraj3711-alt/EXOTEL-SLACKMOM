@@ -263,9 +263,8 @@ class DatabaseManager:
     def mark_call_processed(self, call_data: Dict[str, Any], transcription: str, success: bool):
         """Mark call as processed"""
         with self._get_connection() as conn:
-            # Use UPDATE instead of INSERT OR REPLACE to preserve slack_posted flag
-            # This prevents duplicate webhooks from overwriting successful completions
-            conn.execute("""
+            # Try UPDATE first to preserve slack_posted flag if record exists
+            cursor = conn.execute("""
                 UPDATE processed_calls 
                 SET transcription_text = ?, 
                     slack_posted = ?, 
@@ -279,6 +278,26 @@ class DatabaseManager:
                 datetime.utcnow().isoformat(),
                 call_data['call_id']
             ))
+            
+            # If UPDATE didn't affect any rows, INSERT new record
+            if cursor.rowcount == 0:
+                conn.execute("""
+                    INSERT INTO processed_calls 
+                    (call_id, from_number, to_number, duration, timestamp, processed_at, 
+                     transcription_text, slack_posted, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    call_data['call_id'],
+                    call_data['from_number'],
+                    call_data['to_number'],
+                    call_data['duration'],
+                    call_data.get('timestamp', datetime.utcnow().isoformat()),
+                    datetime.utcnow().isoformat(),
+                    transcription,
+                    success,
+                    'completed' if success else 'failed'
+                ))
+            
             conn.commit()
         logger.info(f"Marked call {call_data['call_id']} as processed")
     
