@@ -1206,27 +1206,28 @@ async def process_call_with_rate_limit(call_data: Dict[str, Any]):
             else:
                 transcription = "No recording available."
             
-            # Generate MOM only for Normal calls (Voicemails get transcript only)
-            if call_type == "Normal" and transcription and "Error" not in transcription:
-                # Get agent and customer information for MOM generation
-                agent_info = SlackFormatter.find_agent_from_call(
-                    call_data['from_number'],
-                    call_data['to_number'],
-                    call_data.get('exotel_to'),
-                    call_data.get('phone_number_sid')
-                )
-                
+            # Generate MOM for all calls with an identified agent (Normal or Voicemail Call with agent)
+            # Only skip MOM generation for true voicemails (no agent)
+            agent_info = SlackFormatter.find_agent_from_call(
+                call_data['from_number'],
+                call_data['to_number'],
+                call_data.get('exotel_to'),
+                call_data.get('phone_number_sid')
+            )
+            
+            should_generate_mom = (
+                agent_info is not None and 
+                transcription and 
+                "Error" not in transcription
+            )
+            
+            if should_generate_mom:
                 # Determine customer number based on agent detection
-                if agent_info:
-                    if agent_info['direction'] == "outgoing":
-                        customer_number = call_data['to_number']
-                    else:
-                        customer_number = call_data['from_number']
-                    agent_name = agent_info['name']
+                if agent_info['direction'] == "outgoing":
+                    customer_number = call_data['to_number']
                 else:
-                    # Fallback
                     customer_number = call_data['from_number']
-                    agent_name = "Agent"
+                agent_name = agent_info['name']
                 
                 # For MOM generation, use simple labels
                 customer_name_for_mom = "Customer"
