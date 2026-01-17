@@ -1068,7 +1068,7 @@ class SlackFormatter:
 
 *Agent Details*
 • Agent: {agent_name} {agent_mention}
-• Number: `{support_number}`
+• Number: `{agent_phone}`
 • Department: {department}
 
 *Call Duration & Time*
