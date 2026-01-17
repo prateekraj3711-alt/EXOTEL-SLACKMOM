@@ -980,6 +980,7 @@ class SlackFormatter:
             support_number = call_data.get('to_number', 'Unknown')
             customer_number = call_data.get('from_number', 'Unknown')
             agent_name = call_data.get('agent_name', 'Unknown Agent')
+            agent_phone = support_number  # Use support number as fallback
             agent_mention = '@support'
             agent_email = call_data.get('agent_email', '')
             department = call_data.get('department', 'Customer Success')
