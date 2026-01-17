@@ -1037,17 +1037,18 @@ class SlackFormatter:
                 # True voicemail - customer called, no agent involved
                 title_emoji = "📠"
                 title_text = "Voicemail Received"
+                
+                # Show raw transcription for true voicemails
+                if mom and len(mom) > 10:
+                    short_transcription = mom[:1500] + "..." if len(mom) > 1500 else mom
+                    content_section = f"📝 *Voicemail Transcription:*\n\n{short_transcription}"
+                else:
+                    content_section = f"📝 *Voicemail recorded.* Check recording link below (Transcription unavailable or too short)."
             else:
-                # Agent call - agent was involved
+                # Agent call - agent was involved, show MOM
                 title_emoji = "📞"
                 title_text = "Call Received"
-            
-            # If transcription is available (MOM variable holds transcription for voicemails)
-            if mom and len(mom) > 10:
-                short_transcription = mom[:1500] + "..." if len(mom) > 1500 else mom
-                content_section = f"📝 *Voicemail Transcription:*\n\n{short_transcription}"
-            else:
-                content_section = f"📝 *Voicemail recorded.* Check recording link below (Transcription unavailable or too short)."
+                content_section = f"📝 *Meeting Minutes (MOM):*\n\n{mom}"
         else:
             title_emoji = "📞"
             title_text = "Customer Support Call Summary"
