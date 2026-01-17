@@ -168,17 +168,33 @@ class DatabaseManager:
             conn.close()
     
     def is_call_processed(self, call_id: str) -> bool:
-        """Check if call has been successfully processed and posted to Slack"""
+        """Check if call has been successfully posted to Slack"""
         with self._get_connection() as conn:
             # Check if call was ever successfully posted to Slack (regardless of time)
+            logger.info(f"🔍 Layer 1 Check: Querying database for call_id={call_id}")
             result = conn.execute(
                 "SELECT call_id, slack_posted, processed_at FROM processed_calls WHERE call_id = ? AND slack_posted = 1",
                 (call_id,)
             ).fetchone()
+            
+            # Also check what's actually in the database for this call_id
+            all_records = conn.execute(
+                "SELECT call_id, slack_posted, status, processed_at FROM processed_calls WHERE call_id = ?",
+                (call_id,)
+            ).fetchall()
+            
+            if all_records:
+                logger.info(f"🔍 Found {len(all_records)} record(s) for call {call_id}:")
+                for record in all_records:
+                    logger.info(f"   - slack_posted={record[1]} (type: {type(record[1])}), status={record[2]}, processed_at={record[3]}")
+            else:
+                logger.info(f"🔍 No records found in database for call {call_id}")
+            
             if result:
                 processed_at = result[2] if result[2] else 'unknown'
                 logger.info(f"✅ Call {call_id} already successfully posted to Slack at {processed_at}")
                 return True
+            logger.info(f"❌ Call {call_id} NOT found with slack_posted=1")
             return False
     
     def mark_call_processing(self, call_id: str, call_data: Dict[str, Any]) -> bool:
@@ -262,6 +278,9 @@ class DatabaseManager:
     
     def mark_call_processed(self, call_data: Dict[str, Any], transcription: str, success: bool):
         """Mark call as processed"""
+        call_id = call_data['call_id']
+        logger.info(f"📝 Marking call {call_id} as processed: success={success} (type: {type(success)})")
+        
         with self._get_connection() as conn:
             # Try UPDATE first to preserve slack_posted flag if record exists
             cursor = conn.execute("""
@@ -276,18 +295,22 @@ class DatabaseManager:
                 success,
                 'completed' if success else 'failed',
                 datetime.utcnow().isoformat(),
-                call_data['call_id']
+                call_id
             ))
             
+            rows_updated = cursor.rowcount
+            logger.info(f"📝 UPDATE affected {rows_updated} row(s)")
+            
             # If UPDATE didn't affect any rows, INSERT new record
-            if cursor.rowcount == 0:
+            if rows_updated == 0:
+                logger.info(f"📝 No existing record found, INSERTing new record")
                 conn.execute("""
                     INSERT INTO processed_calls 
                     (call_id, from_number, to_number, duration, timestamp, processed_at, 
                      transcription_text, slack_posted, status)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    call_data['call_id'],
+                    call_id,
                     call_data['from_number'],
                     call_data['to_number'],
                     call_data['duration'],
@@ -297,9 +320,19 @@ class DatabaseManager:
                     success,
                     'completed' if success else 'failed'
                 ))
+                logger.info(f"📝 INSERT completed for call {call_id}")
             
             conn.commit()
-        logger.info(f"Marked call {call_data['call_id']} as processed")
+            
+            # Verify what was actually stored
+            verify = conn.execute(
+                "SELECT slack_posted, status FROM processed_calls WHERE call_id = ?",
+                (call_id,)
+            ).fetchone()
+            if verify:
+                logger.info(f"📝 Verification: slack_posted={verify[0]} (type: {type(verify[0])}), status={verify[1]}")
+            
+        logger.info(f"Marked call {call_id} as processed")
     
     def get_stats(self) -> Dict[str, int]:
         """Get processing statistics"""
