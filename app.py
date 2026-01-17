@@ -1032,8 +1032,15 @@ class SlackFormatter:
             title_text = "Missed Call Alert"
             content_section = f"⚠️ *Call was missed.* No recording available."
         elif call_type == "Voicemail Call":
-            title_emoji = "📠"
-            title_text = "Voicemail Received"
+            # Check if this is a true voicemail (no agent) or an agent call
+            if agent_name == "N/A":
+                # True voicemail - customer called, no agent involved
+                title_emoji = "📠"
+                title_text = "Voicemail Received"
+            else:
+                # Agent call - agent was involved
+                title_emoji = "📞"
+                title_text = "Call Received"
             
             # If transcription is available (MOM variable holds transcription for voicemails)
             if mom and len(mom) > 10:
