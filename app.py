@@ -1557,6 +1557,8 @@ async def exotel_webhook(
         # Since duplicate webhooks arrive every 30 minutes, this blocks all duplicates
         try:
             call_date_str = payload.timestamp
+            logger.info(f"⏰ Checking call age - StartTime from webhook: {call_date_str}")
+            
             if call_date_str:
                 # Parse call timestamp
                 if 'T' in call_date_str or '+' in call_date_str or call_date_str.count(':') == 3:
@@ -1572,7 +1574,7 @@ async def exotel_webhook(
                 current_time = datetime.utcnow()
                 call_age_minutes = (current_time - call_time).total_seconds() / 60
                 
-                logger.info(f"⏰ Call age: {call_age_minutes:.1f} minutes")
+                logger.info(f"⏰ Call age: {call_age_minutes:.1f} minutes (current UTC: {current_time}, call time: {call_time})")
                 
                 # Skip if call is older than 35 minutes (duplicate webhook)
                 if call_age_minutes > 35:
@@ -1583,6 +1585,8 @@ async def exotel_webhook(
                         call_id=call_id,
                         timestamp=datetime.utcnow().isoformat() + "Z"
                     )
+            else:
+                logger.warning(f"⚠️ No StartTime in webhook payload, cannot check call age")
         except Exception as e:
             logger.warning(f"⚠️ Could not check call age: {e}")
 
