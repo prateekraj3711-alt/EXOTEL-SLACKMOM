@@ -1552,6 +1552,40 @@ async def exotel_webhook(
         
         logger.info(f"   Detection Debug: Direction={payload.direction}, RecURL={'Present' if payload.recording_url else 'None'}, Price={payload.price}")
         logger.info(f"   Detected Call Type: {call_type}")
+        
+        # TIME-BASED DUPLICATE PREVENTION: Skip calls older than 35 minutes
+        # Since duplicate webhooks arrive every 30 minutes, this blocks all duplicates
+        try:
+            call_date_str = payload.timestamp
+            if call_date_str:
+                # Parse call timestamp
+                if 'T' in call_date_str or '+' in call_date_str or call_date_str.count(':') == 3:
+                    call_date = datetime.fromisoformat(call_date_str.replace('Z', '+00:00'))
+                    call_time = call_date.replace(tzinfo=None)
+                elif ' ' in call_date_str:
+                    # Handle Exotel format: 2026-01-18 10:47:05
+                    call_time = datetime.strptime(call_date_str, '%Y-%m-%d %H:%M:%S')
+                else:
+                    call_time = datetime.fromisoformat(call_date_str)
+                
+                # Calculate age of call
+                current_time = datetime.utcnow()
+                call_age_minutes = (current_time - call_time).total_seconds() / 60
+                
+                logger.info(f"⏰ Call age: {call_age_minutes:.1f} minutes")
+                
+                # Skip if call is older than 35 minutes (duplicate webhook)
+                if call_age_minutes > 35:
+                    logger.warning(f"🚫 DUPLICATE BLOCKED: Call {call_id} is {call_age_minutes:.1f} minutes old (> 35 min threshold)")
+                    return WebhookResponse(
+                        success=True,
+                        message=f"Duplicate blocked - call age {call_age_minutes:.1f} minutes",
+                        call_id=call_id,
+                        timestamp=datetime.utcnow().isoformat() + "Z"
+                    )
+        except Exception as e:
+            logger.warning(f"⚠️ Could not check call age: {e}")
+
 
         # BULLETPROOF DUPLICATE PREVENTION - Layer 1: Quick existence check
         if db_manager.is_call_processed(call_id):
