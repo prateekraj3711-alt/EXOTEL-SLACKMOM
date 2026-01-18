@@ -132,7 +132,29 @@ class DatabaseManager:
     
     def __init__(self, db_path: str):
         self.db_path = db_path
+        self.cache_file = "processed_calls_cache.json"
+        self.processed_cache = self._load_cache()
         self._init_database()
+    
+    def _load_cache(self) -> set:
+        """Load processed call IDs from JSON file"""
+        try:
+            if os.path.exists(self.cache_file):
+                with open(self.cache_file, 'r') as f:
+                    data = json.load(f)
+                    logger.info(f"📦 Loaded {len(data)} processed call IDs from cache file")
+                    return set(data)
+        except Exception as e:
+            logger.warning(f"⚠️ Could not load cache file: {e}")
+        return set()
+    
+    def _save_cache(self):
+        """Save processed call IDs to JSON file"""
+        try:
+            with open(self.cache_file, 'w') as f:
+                json.dump(list(self.processed_cache), f)
+        except Exception as e:
+            logger.error(f"❌ Could not save cache file: {e}")
     
     def _init_database(self):
         """Initialize database schema"""
@@ -169,6 +191,11 @@ class DatabaseManager:
     
     def is_call_processed(self, call_id: str) -> bool:
         """Check if call has been successfully posted to Slack"""
+        # Check in-memory cache first (fastest, survives restarts via JSON file)
+        if call_id in self.processed_cache:
+            logger.info(f"✅ Call {call_id} found in memory cache - DUPLICATE BLOCKED")
+            return True
+        
         with self._get_connection() as conn:
             # Check if call was ever successfully posted to Slack (regardless of time)
             logger.info(f"🔍 Layer 1 Check: Querying database for call_id={call_id}")
@@ -193,6 +220,9 @@ class DatabaseManager:
             if result:
                 processed_at = result[2] if result[2] else 'unknown'
                 logger.info(f"✅ Call {call_id} already successfully posted to Slack at {processed_at}")
+                # Add to cache for faster future lookups
+                self.processed_cache.add(call_id)
+                self._save_cache()
                 return True
             logger.info(f"❌ Call {call_id} NOT found with slack_posted=1")
             return False
@@ -332,6 +362,12 @@ class DatabaseManager:
             if verify:
                 logger.info(f"📝 Verification: slack_posted={verify[0]} (type: {type(verify[0])}), status={verify[1]}")
             
+        # Add to persistent cache if successfully posted
+        if success:
+            self.processed_cache.add(call_id)
+            self._save_cache()
+            logger.info(f"📦 Added call {call_id} to persistent cache")
+        
         logger.info(f"Marked call {call_id} as processed")
     
     def get_stats(self) -> Dict[str, int]:
