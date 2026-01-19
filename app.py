@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="Exotel-Slack Complete System",
     description="Automated call transcription and Slack posting with smart agent detection",
-    version="2.0.1"
+    version="2.0.0"
 )
 
 # Configuration from environment
@@ -1555,9 +1555,10 @@ async def exotel_webhook(
         
         # TIME-BASED DUPLICATE PREVENTION: Skip calls older than 35 minutes
         # Since duplicate webhooks arrive every 30 minutes, this blocks all duplicates
+        logger.info(f"⏰ TIME-BASED CHECK STARTING for call {call_id}")
         try:
             call_date_str = payload.timestamp
-            logger.info(f"⏰ Checking call age - StartTime from webhook: {call_date_str}")
+            logger.info(f"⏰ StartTime from webhook: '{call_date_str}' (type: {type(call_date_str)})")
             
             if call_date_str:
                 # Parse call timestamp
@@ -1585,10 +1586,12 @@ async def exotel_webhook(
                         call_id=call_id,
                         timestamp=datetime.utcnow().isoformat() + "Z"
                     )
+                else:
+                    logger.info(f"✅ Call age OK: {call_age_minutes:.1f} minutes (< 35 min threshold)")
             else:
-                logger.warning(f"⚠️ No StartTime in webhook payload, cannot check call age")
+                logger.warning(f"⚠️ No StartTime in webhook payload for call {call_id}, cannot check call age")
         except Exception as e:
-            logger.warning(f"⚠️ Could not check call age: {e}")
+            logger.error(f"❌ ERROR in time-based duplicate check for call {call_id}: {e}", exc_info=True)
 
 
         # BULLETPROOF DUPLICATE PREVENTION - Layer 1: Quick existence check
