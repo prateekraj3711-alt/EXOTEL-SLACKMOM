@@ -1444,6 +1444,27 @@ async def health_check():
     }
 
 
+
+@app.get("/diagnostic/code-version")
+async def code_version_check():
+    """Diagnostic endpoint to verify what code is deployed"""
+    import inspect
+    
+    # Check if time-based duplicate prevention code exists
+    source = inspect.getsource(exotel_webhook)
+    has_time_based_check = "TIME-BASED DUPLICATE PREVENTION" in source
+    has_time_check_log = "⏰ TIME-BASED CHECK STARTING" in source
+    
+    return {
+        "commit": "6972fc3",
+        "file": "app.py",
+        "has_time_based_check_code": has_time_based_check,
+        "has_time_check_logging": has_time_check_log,
+        "source_length": len(source),
+        "verification": "If both flags are True, the code is deployed correctly"
+    }
+
+
 @app.post("/webhook/exotel", response_model=WebhookResponse)
 @app.post("/webhook/zapier", response_model=WebhookResponse)
 async def exotel_webhook(
