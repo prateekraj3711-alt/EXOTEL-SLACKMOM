@@ -1732,12 +1732,7 @@ async def exotel_webhook(
     except Exception as e:
         logger.error(f"Error in webhook handler: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in webhook handler: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.get("/stats")
